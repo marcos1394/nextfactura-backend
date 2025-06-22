@@ -267,6 +267,96 @@ app.get('/status', authenticateToken, async (req, res) => {
     }
 });
 
+/ --- Nuevos Endpoints ---
+
+/**
+ * Middleware para proteger rutas de administración.
+ * Verifica que el rol en el token JWT sea 'Admin'.
+ */
+const authenticateAdmin = (req, res, next) => {
+    if (req.user && req.user.role === 'Admin') {
+        next();
+    } else {
+        res.status(403).json({ success: false, message: 'Acceso denegado. Se requiere rol de administrador.' });
+    }
+};
+
+// GET /history - Ruta protegida para que un usuario vea su historial de compras
+app.get('/history', authenticateToken, async (req, res) => {
+    try {
+        const purchases = await PlanPurchase.findAll({
+            where: { userId: req.user.id },
+            include: {
+                model: Plan,
+                attributes: ['name', 'features']
+            },
+            order: [['purchaseDate', 'DESC']]
+        });
+        res.status(200).json({ success: true, history: purchases });
+    } catch (error) {
+        console.error('[Payment-Service /history] Error:', error);
+        res.status(500).json({ success: false, message: 'Error al obtener el historial de compras.' });
+    }
+});
+
+
+// --- Rutas de Administración ---
+
+// POST /admin/plans - Crea un nuevo plan
+app.post('/admin/plans', authenticateToken, authenticateAdmin, async (req, res) => {
+    const { name, price, features, isActive } = req.body;
+    try {
+        const newPlan = await Plan.create({ name, price, features, isActive });
+        res.status(201).json({ success: true, plan: newPlan });
+    } catch (error) {
+        console.error('[Payment-Service /admin/plans] Error:', error);
+        res.status(500).json({ success: false, message: 'Error al crear el plan.' });
+    }
+});
+
+// PUT /admin/plans/:id - Actualiza un plan existente
+app.put('/admin/plans/:id', authenticateToken, authenticateAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { name, price, features, isActive } = req.body;
+    try {
+        const plan = await Plan.findByPk(id);
+        if (!plan) return res.status(404).json({ success: false, message: 'Plan no encontrado.' });
+
+        plan.name = name ?? plan.name;
+        plan.price = price ?? plan.price;
+        plan.features = features ?? plan.features;
+        plan.isActive = isActive ?? plan.isActive;
+        
+        await plan.save();
+        res.status(200).json({ success: true, plan });
+    } catch (error) {
+        console.error('[Payment-Service /admin/plans/:id] Error:', error);
+        res.status(500).json({ success: false, message: 'Error al actualizar el plan.' });
+    }
+});
+
+// GET /admin/purchases - Permite a un admin buscar compras por email de usuario
+app.get('/admin/purchases', authenticateToken, authenticateAdmin, async (req, res) => {
+    const { userEmail } = req.query;
+    if (!userEmail) return res.status(400).json({ success: false, message: 'Se requiere el parámetro "userEmail".' });
+    
+    // NOTA: Este endpoint requiere comunicación entre servicios o acceso a la tabla Users.
+    // Por ahora, asumimos que el frontend proporciona el `userId` después de buscarlo en el `auth-service`.
+    // La implementación ideal usaría gRPC o una llamada HTTP interna al `auth-service`.
+    // Versión simplificada:
+    const { userId } = req.query;
+    if (!userId) return res.status(400).json({ success: false, message: 'Se requiere el parámetro "userId".' });
+
+    try {
+        const purchases = await PlanPurchase.findAll({ where: { userId } });
+        res.status(200).json({ success: true, purchases });
+    } catch (error) {
+        console.error('[Payment-Service /admin/purchases] Error:', error);
+        res.status(500).json({ success: false, message: 'Error al buscar las compras.' });
+    }
+});
+
+
 
 // --- Arranque del Servidor ---
 const PORT = process.env.PAYMENT_SERVICE_PORT || 3003;
