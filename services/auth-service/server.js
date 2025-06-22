@@ -74,6 +74,42 @@ const User = sequelize.define('User', {
     timestamps: true 
 });
 
+const Role = sequelize.define('Role', {
+    name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true
+    }
+}, { timestamps: false });
+
+const Permission = sequelize.define('Permission', {
+    name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true
+    },
+    description: {
+        type: DataTypes.STRING
+    }
+}, { timestamps: false });
+
+const AuditLog = sequelize.define('AuditLog', {
+    id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: true },
+    action: { type: DataTypes.STRING, allowNull: false }, // ej: 'LOGIN_SUCCESS', 'PASSWORD_RESET_REQUEST'
+    ipAddress: { type: DataTypes.STRING },
+    userAgent: { type: DataTypes.STRING },
+    details: { type: DataTypes.TEXT }
+});
+
+// --- Definición de Relaciones ---
+User.belongsToMany(Role, { through: 'UserRoles' });
+Role.belongsToMany(User, { through: 'UserRoles' });
+
+Role.belongsToMany(Permission, { through: 'RolePermissions' });
+Permission.belongsToMany(Role, { through: 'RolePermissions' });
+
+
 // --- Funciones Auxiliares ---
 async function sendEmail(to, subject, html) {
     if (!resend) {
