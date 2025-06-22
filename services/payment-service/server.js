@@ -233,6 +233,15 @@ app.post('/webhook/mercadopago', async (req, res) => {
                 purchase.expirationDate = expiration;
                 await purchase.save();
                 console.log(`[Webhook] Compra ${purchase.id} para usuario ${purchase.userId} activada exitosamente.`);
+                // --- NUEVO: Enviar correo de confirmación ---
+                const planDetails = await Plan.findByPk(purchase.planId);
+                const userEmail = paymentDetails.payer.email;
+                if (userEmail && planDetails) {
+                    const emailHtml = `<h1>¡Gracias por tu compra!</h1>
+                                     <p>Tu plan <strong>${planDetails.name}</strong> ha sido activado.</p>
+                                     <p>Estará vigente hasta el: ${purchase.expirationDate.toLocaleDateString('es-MX')}.</p>`;
+                    sendEmail(userEmail, 'Confirmación de tu plan en NextManager', emailHtml);
+                }
             } else {
                 console.log(`[Webhook] Estado de pago no aprobado (${paymentDetails.status}) para compra ${purchase.id}.`);
             }
