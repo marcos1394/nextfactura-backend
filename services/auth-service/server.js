@@ -49,7 +49,26 @@ const User = sequelize.define('User', {
     passwordResetExpires: { type: DataTypes.DATE, allowNull: true },
     // Campos para 2FA
     twoFactorSecret: { type: DataTypes.STRING, allowNull: true },
-    isTwoFactorEnabled: { type: DataTypes.BOOLEAN, defaultValue: false }
+    isTwoFactorEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+    // Para Verificación de Correo Electrónico
+    isEmailVerified: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false
+    },
+    emailVerificationToken: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+
+    // Para Magic Links
+    magicLinkToken: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    magicLinkExpires: {
+        type: DataTypes.DATE,
+        allowNull: true
+    }
 }, { 
     tableName: 'users', 
     timestamps: true 
