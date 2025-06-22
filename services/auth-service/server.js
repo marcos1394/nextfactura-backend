@@ -14,14 +14,41 @@ const crypto = require('crypto'); // Para generar tokens seguros de un solo uso
 const { Resend } = require('resend'); // Para enviar correos transaccionales
 const { authenticator } = require('otplib'); // Para generar y verificar códigos 2FA
 const qrcode = require('qrcode'); // Para generar códigos QR para 2FA
+const passport = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+app.use(passport.initialize());
+
 
 // --- Inicialización de Servicios Externos ---
 // Solo inicializa Resend si la API KEY está presente
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+
+
+
+passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: "/auth/google/callback" // El Gateway redirigirá a esta ruta interna
+  },
+  async (accessToken, refreshToken, profile, done) => {
+    try {
+        const [user, created] = await User.findOrCreate({
+            where: { email: profile.emails[0].value },
+            defaults: {
+                name: profile.displayName,
+                isEmailVerified: true // El email de Google ya está verificado
+            }
+        });
+        return done(null, user);
+    } catch (error) {
+        return done(error, null);
+    }
+  }
+));
 
 // --- Conexión a Base de Datos ---
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
