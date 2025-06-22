@@ -117,6 +117,7 @@ const PlanPurchase = sequelize.define('PlanPurchase', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     userId: { type: DataTypes.UUID, allowNull: false }, // FK al ID del User en auth-service
     planId: { type: DataTypes.UUID, allowNull: false, references: { model: Plan, key: 'id' } },
+    origin: { type: DataTypes.STRING, allowNull: false }, // NUEVO: Se guarda el origen de la compra
     status: { type: DataTypes.STRING, defaultValue: 'pending', allowNull: false }, // pending, processing, active, failed, cancelled
     price: { type: DataTypes.FLOAT, allowNull: false },
     purchaseDate: { type: DataTypes.DATE },
