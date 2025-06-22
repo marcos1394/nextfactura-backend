@@ -1,0 +1,15 @@
+# Dependencias
+node_modules/
+
+# Archivos de entorno - ¡NUNCA SUBIR A GITHUB!
+.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
