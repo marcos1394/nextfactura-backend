@@ -156,17 +156,42 @@ async function sendEmail(to, subject, html) {
     }
 }
 
-// --- Middleware de Autenticación ---
-const authenticateToken = (req, res, next) => {
+const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
     if (!token) return res.status(401).json({ success: false, message: 'Acceso denegado. Token no proporcionado.' });
     
-    jwt.verify(token, process.env.JWT_SECRET, (err, userPayload) => {
-        if (err) return res.status(403).json({ success: false, message: 'Token inválido o expirado.' });
-        req.user = userPayload;
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET, { ignoreExpiration: false });
+        
+        await redisClient.connect();
+        const isBlacklisted = await redisClient.get(`blacklist:${decoded.jti}`);
+        await redisClient.quit();
+
+        if (isBlacklisted) {
+            return res.status(401).json({ success: false, message: 'Token revocado. Por favor, inicia sesión de nuevo.' });
+        }
+        
+        req.user = decoded;
         next();
+    } catch (err) {
+        return res.status(403).json({ success: false, message: 'Token inválido o expirado.' });
+    }
+};
+
+// --- Middleware de Auditoría ---
+const auditTrail = (action) => async (req, res, next) => {
+    // Se ejecuta después de que la ruta principal ha terminado
+    res.on('finish', () => {
+        AuditLog.create({
+            action: action,
+            userId: req.user ? req.user.id : null,
+            ipAddress: req.ip,
+            userAgent: req.get('User-Agent'),
+            details: `Status: ${res.statusCode}`
+        }).catch(err => console.error("Error en AuditLog:", err));
     });
+    next();
 };
 
 // --- Rutas del Servicio de Autenticación ---
@@ -297,6 +322,22 @@ app.post('/password/reset', async (req, res) => {
     }
 });
 
+// --- Rutas para Social Login ---
+// GET /auth/google - Redirige al usuario a Google para autenticarse
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+
+// GET /auth/google/callback - Google redirige aquí después de la autenticación
+app.get('/auth/google/callback', passport.authenticate('google', { session: false, failureRedirect: '/login/failed' }),
+  (req, res) => {
+    // Si la autenticación es exitosa, req.user contiene el usuario de la base de datos
+    const tokenPayload = { id: req.user.id, email: req.user.email, role: req.user.role };
+    const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: '7d' });
+    // Redirige al frontend con el token
+    res.redirect(`${process.env.CLIENT_URL_PROD}/auth/success?token=${token}`);
+  }
+);
+
+
 // --- Rutas de Autenticación de Dos Factores (2FA) ---
 
 // POST /2fa/setup
@@ -352,6 +393,27 @@ app.post('/2fa/validate', async (req, res) => {
         res.status(500).json({ success: false, message: 'Error interno del servidor.' });
     }
 });
+
+// --- Endpoint de Logout ---
+app.post('/logout', authenticateToken, async (req, res) => {
+    try {
+        const jti = req.user.jti; // jti (JWT ID) debe ser añadido al crear el token
+        const exp = req.user.exp;
+        const remainingTime = exp - Math.floor(Date.now() / 1000);
+
+        if (remainingTime > 0) {
+            await redisClient.connect();
+            await redisClient.set(`blacklist:${jti}`, 'revoked', { 'EX': remainingTime });
+            await redisClient.quit();
+        }
+        
+        res.status(200).json({ success: true, message: 'Sesión cerrada exitosamente.' });
+    } catch (error) {
+        console.error('[Auth-Service /logout] Redis Error:', error);
+        res.status(500).json({ success: false, message: 'Error al cerrar la sesión.' });
+    }
+});
+
 
 // --- Arranque del Servidor ---
 const PORT = process.env.AUTH_SERVICE_PORT || 3001;
