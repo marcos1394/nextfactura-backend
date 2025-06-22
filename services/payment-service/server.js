@@ -22,6 +22,8 @@ app.use(express.urlencoded({ extended: true }));
 const mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
 const payment = new Payment(mpClient);
 const preference = new Preference(mpClient);
+const resend = new (require('resend').Resend)(process.env.RESEND_API_KEY);
+
 // --- Nuevas Funciones Auxiliares ---
 
 /**
@@ -36,7 +38,6 @@ async function sendEmail(to, subject, html) {
         console.log(`Asunto: ${subject}`);
         return;
     }
-    const resend = new (require('resend').Resend)(process.env.RESEND_API_KEY);
     try {
         await resend.emails.send({
             from: `NextManager <${process.env.EMAIL_FROM || 'onboarding@resend.dev'}>`,
