@@ -9,6 +9,8 @@ const cors = require('cors');
 const { Sequelize, DataTypes, UUIDV4 } = require('sequelize');
 const { MercadoPagoConfig, Preference, Payment } = require('mercadopago');
 const jwt = require('jsonwebtoken');
+const cron = require('node-cron');
+
 
 const app = express();
 // Usamos express.json() y express.urlencoded() ya que bodyParser está deprecado en Express > 4.16
@@ -367,7 +369,6 @@ app.get('/admin/purchases', authenticateToken, authenticateAdmin, async (req, re
 
 
 
-// --- Arranque del Servidor ---
 const PORT = process.env.PAYMENT_SERVICE_PORT || 3003;
 const startServer = async () => {
     try {
@@ -375,7 +376,36 @@ const startServer = async () => {
         console.log('[Payment-Service] Conexión con la BD establecida.');
         await sequelize.sync({ alter: true });
         console.log('[Payment-Service] Modelos sincronizados.');
-        // TODO: Crear planes por defecto si no existen
+        
+        // --- NUEVO: Llamar al Seeder de planes ---
+        await seedPlans();
+        
+        // --- NUEVO: Tarea programada para recordatorios de expiración ---
+        // Se ejecuta todos los días a las 8:00 AM
+        cron.schedule('0 8 * * *', async () => {
+            console.log('[Cron] Ejecutando tarea de recordatorio de expiración...');
+            const sevenDaysFromNow = new Date();
+            sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+
+            const expiringPurchases = await PlanPurchase.findAll({
+                where: {
+                    status: 'active',
+                    expirationDate: {
+                        [Op.lt]: sevenDaysFromNow,
+                        [Op.gt]: new Date()
+                    }
+                }
+            });
+
+            for (const purchase of expiringPurchases) {
+                // Aquí necesitaríamos llamar al auth-service para obtener el email del `purchase.userId`
+                // const userEmail = await getUserEmailById(purchase.userId);
+                // const emailHtml = `...`;
+                // sendEmail(userEmail, 'Tu plan de NextManager está por expirar', emailHtml);
+                console.log(`[Cron] Recordatorio para usuario ${purchase.userId} cuyo plan expira el ${purchase.expirationDate.toLocaleDateString()}`);
+            }
+        });
+        
         app.listen(PORT, () => {
             console.log(`🚀 Payment-Service profesional escuchando en el puerto ${PORT}`);
         });
