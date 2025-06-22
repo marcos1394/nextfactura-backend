@@ -20,6 +20,75 @@ app.use(express.urlencoded({ extended: true }));
 const mpClient = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
 const payment = new Payment(mpClient);
 const preference = new Preference(mpClient);
+// --- Nuevas Funciones Auxiliares ---
+
+/**
+ * Envía correos electrónicos usando Resend.
+ * @param {string} to - Email del destinatario.
+ * @param {string} subject - Asunto del correo.
+ * @param {string} html - Contenido HTML del correo.
+ */
+async function sendEmail(to, subject, html) {
+    if (!process.env.RESEND_API_KEY) {
+        console.warn(`[Email] RESEND_API_KEY no configurada. Simulación de correo para ${to}:`);
+        console.log(`Asunto: ${subject}`);
+        return;
+    }
+    const resend = new (require('resend').Resend)(process.env.RESEND_API_KEY);
+    try {
+        await resend.emails.send({
+            from: `NextManager <${process.env.EMAIL_FROM || 'onboarding@resend.dev'}>`,
+            to,
+            subject,
+            html,
+        });
+        console.log(`[Email] Correo enviado exitosamente a ${to}`);
+    } catch (error) {
+        console.error(`[Email] Error al enviar correo a ${to}:`, error.message);
+    }
+}
+
+/**
+ * Crea los planes por defecto en la base de datos si no existen.
+ * Esta función se llama al iniciar el servidor.
+ */
+async function seedPlans() {
+    const plansToSeed = [
+        {
+            name: 'Básico',
+            price: 199.00,
+            features: { reports: true, users: 1, pos_sync: true },
+            isActive: true
+        },
+        {
+            name: 'Profesional',
+            price: 399.00,
+            features: { reports: true, users: 5, pos_sync: true, custom_branding: true },
+            isActive: true
+        },
+        {
+            name: 'Corporativo',
+            price: 799.00,
+            features: { reports: true, users: 'unlimited', pos_sync: true, custom_branding: true, api_access: true },
+            isActive: true
+        }
+    ];
+
+    try {
+        for (const planData of plansToSeed) {
+            const [plan, created] = await Plan.findOrCreate({
+                where: { name: planData.name },
+                defaults: planData
+            });
+            if (created) {
+                console.log(`[Seed] Plan "${plan.name}" creado.`);
+            }
+        }
+        console.log('[Seed] Verificación de planes completada.');
+    } catch (error) {
+        console.error('[Seed] Error al crear los planes por defecto:', error);
+    }
+}
 
 // --- Conexión a Base de Datos ---
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
