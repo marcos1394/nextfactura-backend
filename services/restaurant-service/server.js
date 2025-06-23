@@ -286,49 +286,58 @@ app.post('/restaurants/:id/test-connection', authenticateToken, async (req, res)
 
 // --- Rutas del Servicio de Portal ---
 
-// PUT /portal - Crear o actualizar la configuración del portal de un usuario (Upsert)
-app.put('/portal', authenticateToken, async (req, res) => {
+// Rutas de Portal, ahora anidadas bajo un restaurante
+app.put('/restaurants/:restaurantId/portal', authenticateToken, async (req, res) => {
+    const { restaurantId } = req.params;
     const userId = req.user.id;
-    const { portalName, portalLogoUrl, customDomain, primaryColor, secondaryColor } = req.body;
+    const portalData = req.body;
 
     try {
+        const restaurant = await Restaurant.findOne({ where: { id: restaurantId, userId } });
+        if (!restaurant) return res.status(404).json({ success: false, message: 'Restaurante no encontrado o no autorizado.' });
+
         const [portalConfig, created] = await PortalConfig.findOrCreate({
-            where: { userId },
-            defaults: { portalName, portalLogoUrl, customDomain, primaryColor, secondaryColor }
+            where: { restaurantId },
+            defaults: { ...portalData, restaurantId }
         });
 
         if (!created) {
-            await portalConfig.update({ portalName, portalLogoUrl, customDomain, primaryColor, secondaryColor });
+            await portalConfig.update(portalData);
         }
-        
-        // **PATRÓN DE MICROSERVICIOS: Arquitectura Orientada a Eventos**
-        // Si se configuró un dominio personalizado, este es el momento de notificar a otros servicios.
-        if (customDomain) {
-            console.log(`[Restaurant-Service] EVENTO: 'portal.domain.configured' emitido para ${customDomain}.`);
-            // En una implementación real, aquí se publicaría un mensaje a un broker (RabbitMQ, Kafka)
-            // o se llamaría a un webhook de un servicio de infraestructura para que
-            // se encargue de la configuración del DNS (ej. crear un registro CNAME).
+
+        // Llamada por Webhook al servicio de infraestructura si se configura un dominio
+        if (portalData.customDomain && process.env.INFRA_SERVICE_URL) {
+            console.log(`[Restaurant-Service] Notificando al servicio de infraestructura sobre el dominio: ${portalData.customDomain}`);
+            fetch(`${process.env.INFRA_SERVICE_URL}/configure-domain`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': process.env.INTERNAL_SECRET },
+                body: JSON.stringify({ domain: portalData.customDomain })
+            }).catch(err => console.error("Error al notificar al servicio de infraestructura:", err));
         }
 
         res.status(200).json({ success: true, portalConfig });
     } catch (error) {
         if (error.name === 'SequelizeUniqueConstraintError') {
-            return res.status(409).json({ success: false, message: `El dominio personalizado "${customDomain}" ya está en uso.` });
+            return res.status(409).json({ success: false, message: `El dominio personalizado "${portalData.customDomain}" ya está en uso.` });
         }
-        console.error('[Restaurant-Service /portal] Error:', error);
+        console.error(`[Restaurant-Service /portal/PUT] Error para restaurantId ${restaurantId}:`, error);
         res.status(500).json({ success: false, message: 'Error al guardar la configuración del portal.' });
     }
 });
 
-// GET /portal - Obtener la configuración del portal del usuario autenticado
-app.get('/portal', authenticateToken, async (req, res) => {
+app.get('/restaurants/:restaurantId/portal', authenticateToken, async (req, res) => {
+    const { restaurantId } = req.params;
     const userId = req.user.id;
     try {
-        const portalConfig = await PortalConfig.findOne({ where: { userId } });
-        if (!portalConfig) return res.status(404).json({ success: false, message: 'No se ha configurado un portal para este usuario.' });
+        const restaurant = await Restaurant.findOne({ where: { id: restaurantId, userId } });
+        if (!restaurant) return res.status(404).json({ success: false, message: 'Restaurante no encontrado o no autorizado.' });
+
+        const portalConfig = await PortalConfig.findOne({ where: { restaurantId } });
+        if (!portalConfig) return res.status(404).json({ success: false, message: 'No se ha configurado un portal para este restaurante.' });
+        
         res.status(200).json({ success: true, portalConfig });
     } catch (error) {
-        console.error('[Restaurant-Service /portal] Error:', error);
+        console.error(`[Restaurant-Service /portal/GET] Error para restaurantId ${restaurantId}:`, error);
         res.status(500).json({ success: false, message: 'Error al obtener la configuración del portal.' });
     }
 });
