@@ -1,4 +1,4 @@
-// --- services/restaurant-service/server.js (Versión Profesional y Completa) ---
+// --- services/restaurant-service/server.js (Versión Profesional y de Producción) ---
 
 require('dotenv').config();
 
@@ -7,12 +7,46 @@ const express = require('express');
 const cors = require('cors');
 const { Sequelize, DataTypes, Op, UUIDV4 } = require('sequelize');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const fetch = require('node-fetch');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// --- Configuración de Cifrado ---
+// ¡IMPORTANTE! Esta clave debe estar en tus variables de entorno y ser un string de 32 caracteres.
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY; 
+const IV_LENGTH = 16; // For AES, this is always 16
+
+if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 32) {
+    throw new Error('La variable de entorno ENCRYPTION_KEY es requerida y debe tener 32 caracteres.');
+}
+
+function encrypt(text) {
+    if (text === null || typeof text === 'undefined') {
+        return null;
+    }
+    const iv = crypto.randomBytes(IV_LENGTH);
+    const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+    let encrypted = cipher.update(text);
+    encrypted = Buffer.concat([encrypted, cipher.final()]);
+    return iv.toString('hex') + ':' + encrypted.toString('hex');
+}
+
+function decrypt(text) {
+    if (text === null || typeof text === 'undefined') {
+        return null;
+    }
+    const textParts = text.split(':');
+    const iv = Buffer.from(textParts.shift(), 'hex');
+    const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(ENCRYPTION_KEY), iv);
+    let decrypted = decipher.update(encryptedText);
+    decrypted = Buffer.concat([decrypted, decipher.final()]);
+    return decrypted.toString();
+}
 
 // --- Conexión a Base de Datos ---
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
@@ -23,8 +57,7 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
     }
 });
 
-// --- Modelos de Datos (Propiedad de este servicio) ---
-// NOTA: Se añade `paranoid: true` para habilitar el borrado lógico (soft deletes)
+// --- Modelos de Datos con Cifrado Automático ---
 
 const Restaurant = sequelize.define('Restaurant', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
@@ -32,30 +65,41 @@ const Restaurant = sequelize.define('Restaurant', {
     name: { type: DataTypes.STRING, allowNull: false },
     address: { type: DataTypes.STRING },
     logoUrl: { type: DataTypes.STRING },
-    // Datos de conexión al POS
     connectionHost: { type: DataTypes.STRING },
     connectionPort: { type: DataTypes.STRING },
     connectionUser: { type: DataTypes.STRING },
-    connectionPassword: { type: DataTypes.STRING }, // En producción, esto debería cifrarse.
+    connectionPassword: {
+        type: DataTypes.STRING,
+        get() { return decrypt(this.getDataValue('connectionPassword')); },
+        set(value) { this.setDataValue('connectionPassword', encrypt(value)); }
+    },
     connectionDbName: { type: DataTypes.STRING },
-    // Datos de conexión VPN
     vpnUsername: { type: DataTypes.STRING },
-    vpnPassword: { type: DataTypes.STRING } // En producción, esto debería cifrarse.
-}, { tableName: 'restaurants', timestamps: true, paranoid: true }); // Habilitado Soft Delete
+    vpnPassword: {
+        type: DataTypes.STRING,
+        get() { return decrypt(this.getDataValue('vpnPassword')); },
+        set(value) { this.setDataValue('vpnPassword', encrypt(value)); }
+    }
+}, { tableName: 'restaurants', timestamps: true, paranoid: true });
 
 const FiscalData = sequelize.define('FiscalData', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
     restaurantId: { type: DataTypes.UUID, allowNull: false, references: { model: Restaurant, key: 'id' } },
     rfc: { type: DataTypes.STRING, allowNull: false },
     fiscalAddress: { type: DataTypes.STRING, allowNull: false },
-    csdPassword: { type: DataTypes.STRING }, // Cifrar en producción
+    csdPassword: {
+        type: DataTypes.STRING,
+        get() { return decrypt(this.getDataValue('csdPassword')); },
+        set(value) { this.setDataValue('csdPassword', encrypt(value)); }
+    },
     csdCertificateUrl: { type: DataTypes.STRING },
     csdKeyUrl: { type: DataTypes.STRING }
-}, { tableName: 'fiscal_data', timestamps: true, paranoid: true }); // Habilitado Soft Delete
+}, { tableName: 'fiscal_data', timestamps: true, paranoid: true });
 
+// LÓGICA CORREGIDA: Un portal pertenece a UN restaurante.
 const PortalConfig = sequelize.define('PortalConfig', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-    userId: { type: DataTypes.UUID, allowNull: false, unique: true }, // Un solo portal por usuario
+    restaurantId: { type: DataTypes.UUID, allowNull: false, unique: true, references: { model: Restaurant, key: 'id' } },
     portalName: { type: DataTypes.STRING, allowNull: false },
     portalLogoUrl: { type: DataTypes.STRING },
     customDomain: { type: DataTypes.STRING, unique: true, allowNull: true },
@@ -66,6 +110,9 @@ const PortalConfig = sequelize.define('PortalConfig', {
 // Relaciones
 Restaurant.hasOne(FiscalData, { foreignKey: 'restaurantId', onDelete: 'CASCADE' });
 FiscalData.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
+Restaurant.hasOne(PortalConfig, { foreignKey: 'restaurantId', onDelete: 'CASCADE' });
+PortalConfig.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
+
 
 
 // --- Middleware de Autenticación ---
