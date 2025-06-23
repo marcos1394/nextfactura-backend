@@ -1,3 +1,5 @@
+// --- services/restaurant-service/server.js (Versión Profesional y Completa) ---
+
 require('dotenv').config();
 
 // --- Imports de Librerías ---
@@ -155,7 +157,12 @@ app.put('/restaurants/:id', authenticateToken, async (req, res) => {
         
         if (fiscalData) {
             const fiscal = await FiscalData.findOne({ where: { restaurantId: id }, transaction });
-            if (fiscal) await fiscal.update(fiscalData, { transaction });
+            if (fiscal) {
+                await fiscal.update(fiscalData, { transaction });
+            } else {
+                // Si no existen datos fiscales, se pueden crear
+                await FiscalData.create({ ...fiscalData, restaurantId: id }, { transaction });
+            }
         }
         
         await transaction.commit();
@@ -170,7 +177,7 @@ app.put('/restaurants/:id', authenticateToken, async (req, res) => {
 
 // --- Rutas del Servicio de Portal ---
 
-// POST & PUT /portal - Crear o actualizar la configuración del portal de un usuario
+// PUT /portal - Crear o actualizar la configuración del portal de un usuario (Upsert)
 app.put('/portal', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     const { portalName, portalLogoUrl, customDomain, primaryColor, secondaryColor } = req.body;
