@@ -118,7 +118,12 @@ const dataQueryHandler = (query) => async (req, res) => {
 app.get('/query/:restaurantId/products', authenticateToken, dataQueryHandler('SELECT [id], [Code], [Name], [StartDate], [EndDate], [HasTransferredTax], [HasTransferredIEPS], [Complement] FROM [products] ORDER BY [id] ASC'));
 app.get('/query/:restaurantId/cheques', authenticateToken, dataQueryHandler('SELECT [totalbebidas], [totalalimentos], [totalsindescuento], [efectivo], [tarjeta], [total], [totalarticulos], [estacion], [idturno], [tipodeservicio], [orden], [cambio], [impreso], [pagado], [mesa], [nopersonas], [cierre], [fecha], [numcheque], [folio] FROM [cheques] ORDER BY [fecha] DESC'));
 app.get('/query/:restaurantId/bitacora', authenticateToken, dataQueryHandler('SELECT [fecha], [usuario], [evento], [valores], [estacion], [idempresa], [seriefolio], [numcheque], [usuariosolicita], [tipoalerta] FROM [bitacorasistema] ORDER BY [fecha] DESC'));
-// ... Añadir aquí el resto de las rutas de consulta (cheqdet, chequespagos, etc.) ...
+// --- Endpoints Faltantes Añadidos ---
+app.get('/query/:restaurantId/cheqdet', authenticateToken, dataQueryHandler('SELECT [movimiento], [idproducto], [precio], [cantidad], [hora], [procesado] FROM [cheqdet] ORDER BY [hora] DESC'));
+app.get('/query/:restaurantId/chequespagos', authenticateToken, dataQueryHandler('SELECT [folio], [idformadepago], [importe], [propina], [tipodecambio] FROM [chequespagos] ORDER BY [folio] DESC'));
+app.get('/query/:restaurantId/declaracioncajero', authenticateToken, dataQueryHandler('SELECT [idturno], [idformadepago], [importedeclarado] FROM [declaracioncajero] ORDER BY [importedeclarado] DESC'));
+app.get('/query/:restaurantId/estaciones', authenticateToken, dataQueryHandler('SELECT [idestacion], [descripcion], [serie], [ip], [directoriorespaldo], [mensajespera], [rutatemoral], [PostLastOnline] FROM [estaciones]'));
+
 
 
 // --- Arranque del Servidor ---
