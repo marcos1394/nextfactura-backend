@@ -242,38 +242,40 @@ app.delete('/restaurants/:id', authenticateToken, async (req, res) => {
 
 // --- NUEVO: Endpoint para probar la conexión al POS ---
 // Este endpoint delega la responsabilidad de la prueba al futuro `pos-service`.
+// Endpoint REAL para probar la conexión al POS
 app.post('/restaurants/:id/test-connection', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
     try {
         const restaurant = await Restaurant.findOne({ where: { id, userId } });
-        if (!restaurant) {
-            return res.status(404).json({ success: false, message: 'Restaurante no encontrado o no autorizado.' });
-        }
+        if (!restaurant) return res.status(404).json({ success: false, message: 'Restaurante no encontrado o no autorizado.' });
 
-        const { connectionHost, connectionPort, connectionUser, connectionPassword, connectionDbName } = restaurant;
-        if (!connectionHost || !connectionUser || !connectionPassword || !connectionDbName) {
+        const connectionData = {
+            host: restaurant.connectionHost,
+            port: restaurant.connectionPort,
+            user: restaurant.connectionUser,
+            password: restaurant.connectionPassword, // El getter lo descifra automáticamente
+            database: restaurant.connectionDbName,
+        };
+        if (Object.values(connectionData).some(v => !v)) {
             return res.status(400).json({ success: false, message: 'Los datos de conexión del restaurante están incompletos.' });
         }
         
-        // **PATRÓN DE MICROSERVICIOS: Comunicación Inter-Servicios**
-        // Este servicio no se conecta directamente. Llama al servicio especializado.
-        // En una implementación real, se usaría un cliente HTTP como Axios o Fetch.
-        // const posServiceUrl = process.env.POS_SERVICE_URL;
-        // const response = await fetch(`${posServiceUrl}/test-connection`, {
-        //     method: 'POST',
-        //     headers: { 'Content-Type': 'application/json' },
-        //     body: JSON.stringify({ connectionData: restaurant })
-        // });
-        // const result = await response.json();
-        // if (!response.ok) throw new Error(result.message);
-        
-        // **Simulación para desarrollo:**
-        console.log(`[Restaurant-Service] SIMULANDO llamada al pos-service para probar conexión de: ${restaurant.name}`);
-        const mockResult = { success: true, message: 'Conexión con SoftRestaurant exitosa (Simulado).' };
+        // Llamada HTTP real al servicio de POS
+        const posServiceUrl = process.env.POS_SERVICE_URL;
+        if (!posServiceUrl) throw new Error("POS_SERVICE_URL no está configurada.");
 
-        res.status(200).json(mockResult);
+        const response = await fetch(`${posServiceUrl}/test-connection`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ connectionData })
+        });
+
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Error en el servicio de POS.');
+
+        res.status(200).json(result);
 
     } catch (error) {
         console.error(`[Restaurant-Service /test-connection] Error:`, error);
