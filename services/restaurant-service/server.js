@@ -24,7 +24,7 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
 });
 
 // --- Modelos de Datos (Propiedad de este servicio) ---
-// NOTA: Este servicio NO conoce el modelo User. Solo sabe que existe un 'userId' de tipo UUID.
+// NOTA: Se añade `paranoid: true` para habilitar el borrado lógico (soft deletes)
 
 const Restaurant = sequelize.define('Restaurant', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
@@ -41,7 +41,7 @@ const Restaurant = sequelize.define('Restaurant', {
     // Datos de conexión VPN
     vpnUsername: { type: DataTypes.STRING },
     vpnPassword: { type: DataTypes.STRING } // En producción, esto debería cifrarse.
-}, { tableName: 'restaurants', timestamps: true });
+}, { tableName: 'restaurants', timestamps: true, paranoid: true }); // Habilitado Soft Delete
 
 const FiscalData = sequelize.define('FiscalData', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
@@ -51,7 +51,7 @@ const FiscalData = sequelize.define('FiscalData', {
     csdPassword: { type: DataTypes.STRING }, // Cifrar en producción
     csdCertificateUrl: { type: DataTypes.STRING },
     csdKeyUrl: { type: DataTypes.STRING }
-}, { tableName: 'fiscal_data', timestamps: true });
+}, { tableName: 'fiscal_data', timestamps: true, paranoid: true }); // Habilitado Soft Delete
 
 const PortalConfig = sequelize.define('PortalConfig', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
@@ -160,7 +160,6 @@ app.put('/restaurants/:id', authenticateToken, async (req, res) => {
             if (fiscal) {
                 await fiscal.update(fiscalData, { transaction });
             } else {
-                // Si no existen datos fiscales, se pueden crear
                 await FiscalData.create({ ...fiscalData, restaurantId: id }, { transaction });
             }
         }
@@ -174,6 +173,67 @@ app.put('/restaurants/:id', authenticateToken, async (req, res) => {
         res.status(500).json({ success: false, message: 'Error al actualizar el restaurante.' });
     }
 });
+
+// DELETE /restaurants/:id - Borrado lógico de un restaurante
+app.delete('/restaurants/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    try {
+        const restaurant = await Restaurant.findOne({ where: { id, userId } });
+        if (!restaurant) {
+            return res.status(404).json({ success: false, message: 'Restaurante no encontrado o no autorizado.' });
+        }
+        // Sequelize `destroy` con `paranoid: true` hará un borrado lógico
+        await restaurant.destroy();
+        res.status(200).json({ success: true, message: 'Restaurante desactivado exitosamente.' });
+    } catch (error) {
+        console.error(`[Restaurant-Service /restaurants/${id}] Error:`, error);
+        res.status(500).json({ success: false, message: 'Error al desactivar el restaurante.' });
+    }
+});
+
+// --- NUEVO: Endpoint para probar la conexión al POS ---
+// Este endpoint delega la responsabilidad de la prueba al futuro `pos-service`.
+app.post('/restaurants/:id/test-connection', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    try {
+        const restaurant = await Restaurant.findOne({ where: { id, userId } });
+        if (!restaurant) {
+            return res.status(404).json({ success: false, message: 'Restaurante no encontrado o no autorizado.' });
+        }
+
+        const { connectionHost, connectionPort, connectionUser, connectionPassword, connectionDbName } = restaurant;
+        if (!connectionHost || !connectionUser || !connectionPassword || !connectionDbName) {
+            return res.status(400).json({ success: false, message: 'Los datos de conexión del restaurante están incompletos.' });
+        }
+        
+        // **PATRÓN DE MICROSERVICIOS: Comunicación Inter-Servicios**
+        // Este servicio no se conecta directamente. Llama al servicio especializado.
+        // En una implementación real, se usaría un cliente HTTP como Axios o Fetch.
+        // const posServiceUrl = process.env.POS_SERVICE_URL;
+        // const response = await fetch(`${posServiceUrl}/test-connection`, {
+        //     method: 'POST',
+        //     headers: { 'Content-Type': 'application/json' },
+        //     body: JSON.stringify({ connectionData: restaurant })
+        // });
+        // const result = await response.json();
+        // if (!response.ok) throw new Error(result.message);
+        
+        // **Simulación para desarrollo:**
+        console.log(`[Restaurant-Service] SIMULANDO llamada al pos-service para probar conexión de: ${restaurant.name}`);
+        const mockResult = { success: true, message: 'Conexión con SoftRestaurant exitosa (Simulado).' };
+
+        res.status(200).json(mockResult);
+
+    } catch (error) {
+        console.error(`[Restaurant-Service /test-connection] Error:`, error);
+        res.status(500).json({ success: false, message: error.message || 'Error al probar la conexión.' });
+    }
+});
+
 
 // --- Rutas del Servicio de Portal ---
 
@@ -192,6 +252,15 @@ app.put('/portal', authenticateToken, async (req, res) => {
             await portalConfig.update({ portalName, portalLogoUrl, customDomain, primaryColor, secondaryColor });
         }
         
+        // **PATRÓN DE MICROSERVICIOS: Arquitectura Orientada a Eventos**
+        // Si se configuró un dominio personalizado, este es el momento de notificar a otros servicios.
+        if (customDomain) {
+            console.log(`[Restaurant-Service] EVENTO: 'portal.domain.configured' emitido para ${customDomain}.`);
+            // En una implementación real, aquí se publicaría un mensaje a un broker (RabbitMQ, Kafka)
+            // o se llamaría a un webhook de un servicio de infraestructura para que
+            // se encargue de la configuración del DNS (ej. crear un registro CNAME).
+        }
+
         res.status(200).json({ success: true, portalConfig });
     } catch (error) {
         if (error.name === 'SequelizeUniqueConstraintError') {
