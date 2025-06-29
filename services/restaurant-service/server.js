@@ -20,7 +20,6 @@ const { Sequelize, DataTypes, Op, UUIDV4 } = require('sequelize');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
-const bcrypt = require('bcryptjs');
 
 
 const app = express();
