@@ -1,32 +1,29 @@
-# Dockerfile para cada microservicio (Versión Corregida)
+# ==========================================================
+# Dockerfile con Base Robusta (Solución Definitiva)
+# ==========================================================
 
-# --- Etapa 1: Build (Construcción) ---
-# Usamos una imagen completa de Node para instalar dependencias de forma segura
-FROM node:18-alpine AS builder
+# --- Etapa 1: Build ---
+# CAMBIO: Usamos node:18-bullseye, una base Debian robusta y compatible
+FROM node:18-bullseye-slim AS builder
 WORKDIR /app
 
-# Copiamos solo los archivos de manifiesto para aprovechar la caché de Docker
 COPY package.json package-lock.json* ./
 
-# --- CORRECCIÓN DEFINITIVA ---
-# Usamos 'npm install' en lugar de 'npm ci'.
-# 'npm install' es más flexible y creará un package-lock.json si no existe.
-# Usamos '--omit=dev' para no instalar las dependencias de desarrollo.
-RUN npm install --omit=dev
+# Instala dependencias necesarias para los healthchecks
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
+
+# Instala dependencias de Node
+RUN npm install --only=production
 
 # --- Etapa 2: Producción ---
-# Usamos una imagen 'slim' de Node, que es más pequeña y tiene menos vulnerabilidades
-FROM node:18-alpine AS production
+FROM node:18-bullseye-slim AS production
 WORKDIR /app
 
-# Copiamos las dependencias ya instaladas desde la etapa de 'builder'
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /usr/bin/wget /usr/bin/wget 
 
-# Copiamos el código fuente de la aplicación
 COPY . .
 
-# Exponemos el puerto interno del contenedor
 EXPOSE 8080
 
-# Comando para iniciar el servicio cuando el contenedor se ejecute
 CMD [ "node", "server.js" ]
