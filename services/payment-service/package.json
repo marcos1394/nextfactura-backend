@@ -17,8 +17,9 @@
     "jsonwebtoken": "^9.0.2",
     "mercadopago": "^2.0.10",
     "node-cron": "^3.0.3",
-    "pg": "^8.11.5",
+    "pg": "^8.16.3",
     "pg-hstore": "^2.3.4",
+    "resend": "^4.6.0",
     "sequelize": "^6.37.3"
   },
   "devDependencies": {

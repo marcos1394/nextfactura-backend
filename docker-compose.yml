@@ -1,0 +1,113 @@
+# ===================================================================
+# docker-compose.yml (Versión con Indentación Corregida)
+# ===================================================================
+services:
+  # --- Servicio de Cache para tokens, sesiones, etc. ---
+  redis:
+    image: redis:alpine
+    restart: always
+    hostname: redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- Servicio de Autenticación ---
+  auth-service:
+    build: ./services/auth-service
+    restart: always
+    env_file:
+      - ./.env
+    ports:
+      - "${AUTH_SERVICE_PORT:-4001}:8080"
+    depends_on: # <-- CORREGIDO: Añadido para que espere a Redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Servicio de Restaurantes ---
+  restaurant-service:
+    build: ./services/restaurant-service
+    restart: always
+    env_file:
+      - ./.env
+    ports:
+      - "${RESTAURANT_SERVICE_PORT:-4002}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      
+  # --- Servicio de Pagos ---
+  payment-service:
+    build: ./services/payment-service
+    restart: always
+    env_file:
+      - ./.env
+    ports:
+      - "${PAYMENT_SERVICE_PORT:-4003}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Servicio del POS ---
+  pos-service:
+    build: ./services/pos-service
+    restart: always
+    env_file:
+      - ./.env
+    ports:
+      - "${POS_SERVICE_PORT:-4004}:8080"
+    depends_on:
+      restaurant-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      
+  # --- Servicio del PAC ---
+  pac-service:
+    build: ./services/pac-service
+    restart: always
+    env_file:
+      - ./.env
+    ports:
+      - "${PAC_SERVICE_PORT:-4005}:8080"
+    depends_on:
+      restaurant-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      
+  # --- API Gateway (El único punto de entrada público) ---
+  api-gateway:
+    build: ./api-gateway
+    restart: always
+    env_file:
+      - ./.env
+    ports:
+      - "${API_GATEWAY_PORT:-8080}:8080"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      restaurant-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      pos-service:
+        condition: service_healthy
+      pac-service:
+        condition: service_healthy

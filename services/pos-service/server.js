@@ -114,6 +114,11 @@ const dataQueryHandler = (query) => async (req, res) => {
     }
 };
 
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+
 // Se definen las rutas y las consultas SQL correspondientes
 app.get('/query/:restaurantId/products', authenticateToken, dataQueryHandler('SELECT [id], [Code], [Name], [StartDate], [EndDate], [HasTransferredTax], [HasTransferredIEPS], [Complement] FROM [products] ORDER BY [id] ASC'));
 app.get('/query/:restaurantId/cheques', authenticateToken, dataQueryHandler('SELECT [totalbebidas], [totalalimentos], [totalsindescuento], [efectivo], [tarjeta], [total], [totalarticulos], [estacion], [idturno], [tipodeservicio], [orden], [cambio], [impreso], [pagado], [mesa], [nopersonas], [cierre], [fecha], [numcheque], [folio] FROM [cheques] ORDER BY [fecha] DESC'));

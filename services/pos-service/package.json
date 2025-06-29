@@ -15,7 +15,8 @@
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "mssql": "^10.0.2",
-    "node-fetch": "^2.7.0"
+    "node-fetch": "^2.7.0",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

@@ -1,5 +1,16 @@
 // --- services/restaurant-service/server.js (Versión Profesional y de Producción) ---
 
+// =================================================================
+process.on('uncaughtException', (error, origin) => {
+    console.error('<<<<< ¡ERROR FATAL INESPERADO! (UNCAUGHT EXCEPTION) >>>>>');
+    console.error('Esto significa que una parte del código generó un error y no fue atrapado por un try/catch.');
+    console.error('--- DETALLES DEL ERROR ---');
+    console.error(error);
+    console.error('\n--- ORIGEN DEL ERROR ---');
+    console.error(origin);
+    process.exit(1); // Es una buena práctica terminar el proceso después de un error así.
+});
+
 require('dotenv').config();
 
 // --- Imports de Librerías ---
@@ -9,6 +20,8 @@ const { Sequelize, DataTypes, Op, UUIDV4 } = require('sequelize');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
+const bcrypt = require('bcryptjs');
+
 
 const app = express();
 app.use(cors());
@@ -48,7 +61,6 @@ function decrypt(text) {
     return decrypted.toString();
 }
 
-// --- Conexión a Base de Datos ---
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
     dialect: 'postgres',
     logging: false,
@@ -56,7 +68,6 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
       ssl: { require: true, rejectUnauthorized: false }
     }
 });
-
 // --- Modelos de Datos con Cifrado Automático ---
 
 const Restaurant = sequelize.define('Restaurant', {
@@ -128,7 +139,23 @@ const authenticateToken = (req, res, next) => {
     }
 };
 
+
+app.post('/test-crash', (req, res) => {
+    console.log('[SMOKE TEST] >>> Petición recibida en /test-crash');
+    console.log('[SMOKE TEST] >>> Cuerpo de la petición:', req.body);
+    res.status(200).json({
+        success: true,
+        message: '¡ÉXITO! Si ves esto, el servidor base y los middlewares funcionan.',
+        received_body: req.body
+    });
+});
+
 // --- Rutas del Servicio de Restaurantes ---
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+
 
 // POST /restaurants - Crear un nuevo restaurante y sus datos fiscales
 app.post('/restaurants', authenticateToken, async (req, res) => {

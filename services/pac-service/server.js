@@ -13,12 +13,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+
+
 // --- Conexión a Base de Datos ---
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
     dialect: 'postgres',
     logging: false,
     dialectOptions: {
-      ssl: { require: true, rejectUnauthorized: false }
+      ssl: { require: false, rejectUnauthorized: false }
     }
 });
 

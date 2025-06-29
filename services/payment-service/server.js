@@ -148,6 +148,12 @@ const authenticateToken = (req, res, next) => {
 };
 
 
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+
+
 // --- Rutas del Servicio de Pagos ---
 
 // GET /plans - Endpoint público para listar los planes disponibles
@@ -280,7 +286,7 @@ app.get('/status', authenticateToken, async (req, res) => {
     }
 });
 
-/ --- Nuevos Endpoints ---
+// --- Nuevos Endpoints ---
 
 /**
  * Middleware para proteger rutas de administración.
