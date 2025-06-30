@@ -20,7 +20,6 @@ const { Sequelize, DataTypes, Op, UUIDV4 } = require('sequelize');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
-const multer = require('multer');
 const path = require('path'); // Módulo nativo de Node para manejar rutas de archivos
 const fs = require('fs');     // Módulo nativo de Node para manejar el sistema de archivos
 const multer = require('multer');
