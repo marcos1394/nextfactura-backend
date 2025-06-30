@@ -157,7 +157,7 @@ app.get('/health', (req, res) => {
 
 
 // POST /restaurants - Crear un nuevo restaurante y sus datos fiscales
-app.post('/restaurants', authenticateToken, async (req, res) => {
+app.post('/', authenticateToken, async (req, res) => {
     const { restaurantData, fiscalData } = req.body;
     const userId = req.user.id;
     
@@ -180,7 +180,7 @@ app.post('/restaurants', authenticateToken, async (req, res) => {
 });
 
 // GET /restaurants - Obtener todos los restaurantes de un usuario
-app.get('/restaurants', authenticateToken, async (req, res) => {
+app.get('/', authenticateToken, async (req, res) => {
     const userId = req.user.id;
     try {
         const restaurants = await Restaurant.findAll({ 
@@ -195,7 +195,7 @@ app.get('/restaurants', authenticateToken, async (req, res) => {
 });
 
 // GET /restaurants/:id - Obtener un restaurante específico
-app.get('/restaurants/:id', authenticateToken, async (req, res) => {
+app.get('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
     try {
@@ -213,7 +213,7 @@ app.get('/restaurants/:id', authenticateToken, async (req, res) => {
 
 
 // PUT /restaurants/:id - Actualizar un restaurante y sus datos fiscales
-app.put('/restaurants/:id', authenticateToken, async (req, res) => {
+app.put('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { restaurantData, fiscalData } = req.body;
     const userId = req.user.id;
@@ -248,7 +248,7 @@ app.put('/restaurants/:id', authenticateToken, async (req, res) => {
 });
 
 // DELETE /restaurants/:id - Borrado lógico de un restaurante
-app.delete('/restaurants/:id', authenticateToken, async (req, res) => {
+app.delete('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
@@ -269,7 +269,7 @@ app.delete('/restaurants/:id', authenticateToken, async (req, res) => {
 // --- NUEVO: Endpoint para probar la conexión al POS ---
 // Este endpoint delega la responsabilidad de la prueba al futuro `pos-service`.
 // Endpoint REAL para probar la conexión al POS
-app.post('/restaurants/:id/test-connection', authenticateToken, async (req, res) => {
+app.post('/:id/test-connection', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
 
