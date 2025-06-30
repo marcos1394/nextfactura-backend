@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const proxy = require('express-http-proxy');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const cors = require('cors');
 
 const app = express();
@@ -8,45 +8,33 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- Obtener las URLs de los microservicios desde las variables de entorno ---
-// (Estas son las que configuraste en el panel de Environment de Render)
+// --- Obtener las URLs de los microservicios ---
 const authServiceUrl = process.env.AUTH_SERVICE_URL;
 const restaurantServiceUrl = process.env.RESTAURANT_SERVICE_URL;
 const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL;
 const posServiceUrl = process.env.POS_SERVICE_URL;
 const pacServiceUrl = process.env.PAC_SERVICE_URL;
 
-// Imprimimos las URLs al iniciar para verificar que se cargaron bien
-console.log(`Redirigiendo a AUTH_SERVICE: ${authServiceUrl}`);
-console.log(`Redirigiendo a RESTAURANT_SERVICE: ${restaurantServiceUrl}`);
-// ... puedes añadir logs para las otras si quieres
+console.log(`Auth Service URL: ${authServiceUrl}`);
+console.log(`Restaurant Service URL: ${restaurantServiceUrl}`);
 
-// --- Endpoint de Healthcheck para el propio Gateway ---
+// --- Endpoint de Healthcheck ---
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok', service: 'api-gateway' });
 });
 
 // --- Configuración de las Reglas de Proxy ---
-// Aquí está la magia. Cada línea es una regla de enrutamiento.
+// Esta librería SÍ reenvía la ruta completa, que es lo que tus servicios esperan.
+// Por ejemplo, una petición a /restaurants se reenvía como /restaurants al servicio de destino.
 
-// Si la petición empieza con /auth, reenvíala a auth-service
-app.use('/auth', proxy(authServiceUrl));
-
-// Si la petición empieza con /restaurants, reenvíala a restaurant-service
-app.use('/restaurants', proxy(restaurantServiceUrl));
-
-// Si la petición empieza con /payments, reenvíala a payment-service
-app.use('/payments', proxy(paymentServiceUrl));
-
-// Si la petición empieza con /pos, reenvíala a pos-service
-app.use('/pos', proxy(posServiceUrl));
-
-// Si la petición empieza con /pac, reenvíala a pac-service
-app.use('/pac', proxy(pacServiceUrl));
-
+if (authServiceUrl) app.use('/auth', createProxyMiddleware({ target: authServiceUrl, changeOrigin: true }));
+if (restaurantServiceUrl) app.use('/restaurants', createProxyMiddleware({ target: restaurantServiceUrl, changeOrigin: true }));
+if (paymentServiceUrl) app.use('/payments', createProxyMiddleware({ target: paymentServiceUrl, changeOrigin: true }));
+if (posServiceUrl) app.use('/pos', createProxyMiddleware({ target: posServiceUrl, changeOrigin: true }));
+if (pacServiceUrl) app.use('/pac', createProxyMiddleware({ target: pacServiceUrl, changeOrigin: true }));
 
 // --- Arranque del Servidor ---
-const PORT = process.env.PORT || 10000; // Render usa el PORT que te asigna
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-    console.log(`🚀 API Gateway funcional escuchando en el puerto ${PORT}`);
+    console.log(`🚀 API Gateway (v2 - http-proxy-middleware) escuchando en el puerto ${PORT}`);
 });
