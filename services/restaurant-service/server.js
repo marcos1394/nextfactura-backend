@@ -182,6 +182,10 @@ app.get('/health', (req, res) => {
 
 
 
+// --- (en restaurant-service/server.js) ---
+
+// POST / - Crear un nuevo restaurante (CON VALIDACIÓN DE PLAN)
+// --- Endpoint de Creación de Restaurante (VERSIÓN COMPLETA) ---
 app.post('/',
     authenticateToken,
     upload.fields([
@@ -191,45 +195,60 @@ app.post('/',
     ]),
     async (req, res) => {
         
-    // --- 1. VALIDACIÓN DE PLAN (se mantiene igual) ---
-    // ... (la lógica para llamar al payment-service va aquí si la necesitas) ...
+    // --- 1. VALIDACIÓN DE PLAN ---
+    try {
+        const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL;
+        if (!paymentServiceUrl) throw new Error("La URL del servicio de pagos no está configurada.");
 
-    const { data } = req.body;
-    if (!data) {
-        return res.status(400).json({ success: false, message: 'Falta el campo "data" con el JSON del restaurante.' });
+        const planCheckResponse = await fetch(`${paymentServiceUrl}/subscription-check`, {
+            headers: { 'Authorization': req.headers.authorization }
+        });
+        const planCheckData = await planCheckResponse.json();
+        
+        if (!planCheckResponse.ok || !planCheckData.canCreate) {
+            return res.status(403).json({ success: false, message: planCheckData.reason || "No tienes permiso para crear un restaurante." });
+        }
+    } catch (error) {
+        console.error('[Restaurant-Service] Error al validar plan:', error);
+        return res.status(500).json({ success: false, message: 'No se pudo verificar tu plan de suscripción.' });
     }
-    const { restaurantData, fiscalData } = JSON.parse(data);
+
+    // --- 2. PROCESAR DATOS Y ARCHIVOS ---
+    // En una petición form-data, los datos de texto vienen en req.body
+    const { restaurantData, fiscalData } = req.body;
     const userId = req.user.id;
 
-    if (!restaurantData || !fiscalData || !restaurantData.name || !fiscalData.rfc) {
-        return res.status(400).json({ success: false, message: 'Faltan datos requeridos.' });
+    if (!restaurantData || !fiscalData) {
+        return res.status(400).json({ success: false, message: 'Faltan los objetos restaurantData o fiscalData.' });
     }
+    
+    // Construir URLs para los archivos subidos
+    const getFileUrl = (fieldName) => {
+        if (req.files && req.files[fieldName]) {
+            const filename = req.files[fieldName][0].filename;
+            return `${process.env.BASE_URL}/uploads/${filename}`;
+        }
+        return null;
+    };
 
+    const logoUrl = getFileUrl('logo');
+    const csdCertificateUrl = getFileUrl('csdCertificate');
+    const csdKeyUrl = getFileUrl('csdKey');
+    
     const transaction = await sequelize.transaction();
     try {
-        // --- 2. CONSTRUIR LAS URLs LOCALES ---
-        // Multer ya guardó los archivos, ahora construimos la URL pública para cada uno
-        const getFileUrl = (fieldName) => {
-            if (req.files && req.files[fieldName]) {
-                const filename = req.files[fieldName][0].filename;
-                return `${process.env.BASE_URL}/uploads/${filename}`;
-            }
-            return null;
-        };
-
-        const logoUrl = getFileUrl('logo');
-        const csdCertificateUrl = getFileUrl('csdCertificate');
-        const csdKeyUrl = getFileUrl('csdKey');
+        const parsedRestaurantData = JSON.parse(restaurantData);
+        const parsedFiscalData = JSON.parse(fiscalData);
         
-        // --- 3. CREAR EN BASE DE DATOS ---
+        // --- 3. CREAR EN BASE DE DATOS CON URLs ---
         const newRestaurant = await Restaurant.create({ 
-            ...restaurantData, 
+            ...parsedRestaurantData, 
             userId,
             logoUrl
         }, { transaction });
 
         const newFiscalData = await FiscalData.create({ 
-            ...fiscalData, 
+            ...parsedFiscalData, 
             restaurantId: newRestaurant.id,
             csdCertificateUrl,
             csdKeyUrl
@@ -244,6 +263,7 @@ app.post('/',
         res.status(500).json({ success: false, message: 'Error al crear el restaurante.' });
     }
 });
+
 
 
 // GET /restaurants - Obtener todos los restaurantes de un usuario
