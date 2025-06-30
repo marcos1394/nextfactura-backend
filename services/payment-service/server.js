@@ -156,8 +156,41 @@ app.get('/health', (req, res) => {
 
 // --- Rutas del Servicio de Pagos ---
 
+// --- (en payment-service/server.js) ---
+
+// GET /subscription-check - Endpoint INTERNO para que otros servicios validen un plan.
+app.get('/subscription-check', authenticateToken, async (req, res) => {
+    try {
+        const activePurchase = await PlanPurchase.findOne({
+            where: {
+                userId: req.user.id,
+                status: 'active',
+                expirationDate: { [Op.gt]: new Date() } // Op.gt es "greater than"
+            }
+        });
+
+        if (!activePurchase) {
+            // El usuario no tiene un plan activo o está expirado.
+            return res.status(403).json({ 
+                success: false, 
+                canCreate: false, 
+                reason: 'No tienes una suscripción activa.' 
+            });
+        }
+
+        // Aquí puedes añadir lógica más compleja si quieres (ej. contar restaurantes)
+        // Por ahora, si tiene un plan activo, puede crear.
+        res.status(200).json({ success: true, canCreate: true });
+
+    } catch (error) {
+        console.error('[Payment-Service /subscription-check] Error:', error);
+        res.status(500).json({ success: false, canCreate: false, reason: 'Error interno al verificar la suscripción.' });
+    }
+});
+
+
 // GET /plans - Endpoint público para listar los planes disponibles
-app.get('/plans', async (req, res) => {
+app.get('/', async (req, res) => {
     try {
         const plans = await Plan.findAll({ where: { isActive: true } });
         res.status(200).json({ success: true, plans });

@@ -20,7 +20,10 @@ const { Sequelize, DataTypes, Op, UUIDV4 } = require('sequelize');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const fetch = require('node-fetch');
-
+const multer = require('multer');
+const path = require('path'); // Módulo nativo de Node para manejar rutas de archivos
+const fs = require('fs');     // Módulo nativo de Node para manejar el sistema de archivos
+const multer = require('multer');
 
 const app = express();
 app.use(cors());
@@ -35,6 +38,30 @@ const IV_LENGTH = 16; // For AES, this is always 16
 if (!ENCRYPTION_KEY || ENCRYPTION_KEY.length !== 32) {
     throw new Error('La variable de entorno ENCRYPTION_KEY es requerida y debe tener 32 caracteres.');
 }
+
+// 1. Crear la carpeta 'uploads' si no existe
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir);
+}
+
+
+// 2. Servir los archivos de la carpeta 'uploads' como archivos estáticos
+// Esto hace que se pueda acceder a ellos desde una URL pública
+app.use('/uploads', express.static(uploadsDir));
+
+// 3. Configurar Multer para guardar los archivos en el disco
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/'); // Guardar en la carpeta 'uploads'
+    },
+    filename: function (req, file, cb) {
+        // Generar un nombre único para evitar colisiones
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+    }
+});
+const upload = multer({ storage: storage });
 
 function encrypt(text) {
     if (text === null || typeof text === 'undefined') {
@@ -156,28 +183,69 @@ app.get('/health', (req, res) => {
 
 
 
-// POST /restaurants - Crear un nuevo restaurante y sus datos fiscales
-app.post('/', authenticateToken, async (req, res) => {
-    const { restaurantData, fiscalData } = req.body;
+app.post('/',
+    authenticateToken,
+    upload.fields([
+        { name: 'logo', maxCount: 1 },
+        { name: 'csdCertificate', maxCount: 1 },
+        { name: 'csdKey', maxCount: 1 }
+    ]),
+    async (req, res) => {
+        
+    // --- 1. VALIDACIÓN DE PLAN (se mantiene igual) ---
+    // ... (la lógica para llamar al payment-service va aquí si la necesitas) ...
+
+    const { data } = req.body;
+    if (!data) {
+        return res.status(400).json({ success: false, message: 'Falta el campo "data" con el JSON del restaurante.' });
+    }
+    const { restaurantData, fiscalData } = JSON.parse(data);
     const userId = req.user.id;
-    
-    if (!restaurantData || !fiscalData || !restaurantData.name || !fiscalData.rfc || !fiscalData.fiscalAddress) {
-        return res.status(400).json({ success: false, message: 'Faltan datos requeridos del restaurante o fiscales.' });
+
+    if (!restaurantData || !fiscalData || !restaurantData.name || !fiscalData.rfc) {
+        return res.status(400).json({ success: false, message: 'Faltan datos requeridos.' });
     }
 
     const transaction = await sequelize.transaction();
     try {
-        const newRestaurant = await Restaurant.create({ ...restaurantData, userId }, { transaction });
-        const newFiscalData = await FiscalData.create({ ...fiscalData, restaurantId: newRestaurant.id }, { transaction });
+        // --- 2. CONSTRUIR LAS URLs LOCALES ---
+        // Multer ya guardó los archivos, ahora construimos la URL pública para cada uno
+        const getFileUrl = (fieldName) => {
+            if (req.files && req.files[fieldName]) {
+                const filename = req.files[fieldName][0].filename;
+                return `${process.env.BASE_URL}/uploads/${filename}`;
+            }
+            return null;
+        };
+
+        const logoUrl = getFileUrl('logo');
+        const csdCertificateUrl = getFileUrl('csdCertificate');
+        const csdKeyUrl = getFileUrl('csdKey');
+        
+        // --- 3. CREAR EN BASE DE DATOS ---
+        const newRestaurant = await Restaurant.create({ 
+            ...restaurantData, 
+            userId,
+            logoUrl
+        }, { transaction });
+
+        const newFiscalData = await FiscalData.create({ 
+            ...fiscalData, 
+            restaurantId: newRestaurant.id,
+            csdCertificateUrl,
+            csdKeyUrl
+        }, { transaction });
         
         await transaction.commit();
         res.status(201).json({ success: true, restaurant: newRestaurant, fiscalData: newFiscalData });
+
     } catch (error) {
         await transaction.rollback();
-        console.error('[Restaurant-Service /restaurants] Error:', error);
+        console.error('[Restaurant-Service /] Error:', error);
         res.status(500).json({ success: false, message: 'Error al crear el restaurante.' });
     }
 });
+
 
 // GET /restaurants - Obtener todos los restaurantes de un usuario
 app.get('/', authenticateToken, async (req, res) => {
