@@ -202,7 +202,7 @@ app.get('/plans', async (req, res) => {
 
 // POST /create-preference - Ruta protegida para crear una preferencia de pago
 app.post('/create-preference', authenticateToken, async (req, res) => {
-    const { planId } = req.body;
+    const { planId, origin } = req.body;
     const userId = req.user.id;
 
     if (!planId) return res.status(400).json({ success: false, message: 'Se requiere el ID del plan.' });
