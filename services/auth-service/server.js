@@ -311,6 +311,8 @@ app.post('/password/forgot', async (req, res) => {
         const user = await User.findOne({ where: { email: email.toLowerCase() } });
         if (user) {
             const resetToken = crypto.randomBytes(32).toString('hex');
+            console.log('--- TOKEN DE RESETEO PARA PRUEBAS ---:', resetToken);
+
             user.passwordResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
             user.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 minutos de validez
             await user.save();
