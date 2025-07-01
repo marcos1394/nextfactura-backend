@@ -211,12 +211,14 @@ app.post('/create-preference', authenticateToken, async (req, res) => {
         const plan = await Plan.findByPk(planId);
         if (!plan) return res.status(404).json({ success: false, message: 'Plan no encontrado.' });
 
-        const purchase = await PlanPurchase.create({
-            userId,
-            planId,
-            price: plan.price,
-            status: 'pending_preference'
-        });
+        // DESPUÉS:
+const purchase = await PlanPurchase.create({
+    userId,
+    planId,
+    price: plan.price,
+    status: 'pending_preference',
+    origin: origin // <--- ¡Añade esta línea!
+});
 
         const preferenceData = {
             items: [{
