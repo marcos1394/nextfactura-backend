@@ -190,7 +190,7 @@ app.get('/subscription-check', authenticateToken, async (req, res) => {
 
 
 // GET /plans - Endpoint público para listar los planes disponibles
-app.get('/', async (req, res) => {
+app.get('/plans', async (req, res) => {
     try {
         const plans = await Plan.findAll({ where: { isActive: true } });
         res.status(200).json({ success: true, plans });
