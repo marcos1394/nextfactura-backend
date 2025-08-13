@@ -1,6 +1,4 @@
-# ===================================================================
-# docker-compose.yml (Versión con Indentación Corregida)
-# ===================================================================
+# docker-compose.yml (Versión Completa y Corregida)
 services:
   # --- Servicio de Cache para tokens, sesiones, etc. ---
   redis:
@@ -13,6 +11,22 @@ services:
       timeout: 5s
       retries: 5
 
+  # --- Servicio de Base de Datos PostgreSQL ---
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # --- Servicio de Autenticación ---
   auth-service:
     build: ./services/auth-service
@@ -21,8 +35,10 @@ services:
       - ./.env
     ports:
       - "${AUTH_SERVICE_PORT:-4001}:8080"
-    depends_on: # <-- CORREGIDO: Añadido para que espere a Redis
+    depends_on:
       redis:
+        condition: service_healthy
+      postgres: # <-- AÑADIDO: Depende de la base de datos
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
@@ -38,6 +54,9 @@ services:
       - ./.env
     ports:
       - "${RESTAURANT_SERVICE_PORT:-4002}:8080"
+    depends_on: # <-- AÑADIDO: Depende de la base de datos
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -52,6 +71,9 @@ services:
       - ./.env
     ports:
       - "${PAYMENT_SERVICE_PORT:-4003}:8080"
+    depends_on: # <-- AÑADIDO: Depende de la base de datos
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -69,6 +91,8 @@ services:
     depends_on:
       restaurant-service:
         condition: service_healthy
+      postgres: # <-- AÑADIDO: Depende de la base de datos
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -85,6 +109,8 @@ services:
       - "${PAC_SERVICE_PORT:-4005}:8080"
     depends_on:
       restaurant-service:
+        condition: service_healthy
+      postgres: # <-- AÑADIDO: Depende de la base de datos
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
@@ -111,3 +137,7 @@ services:
         condition: service_healthy
       pac-service:
         condition: service_healthy
+
+# --- Volúmenes para persistir datos ---
+volumes:
+  postgres_data:
