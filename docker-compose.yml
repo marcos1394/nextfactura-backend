@@ -30,7 +30,7 @@ services:
   # --- Servicio de Autenticación ---
   auth-service:
     build: ./services/auth-service
-    restart: always
+    restart: on-failure # <-- CORRECCIÓN AÑADIDA
     env_file:
       - ./.env
     ports:
@@ -38,7 +38,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      postgres: # <-- AÑADIDO: Depende de la base de datos
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
@@ -49,12 +49,12 @@ services:
   # --- Servicio de Restaurantes ---
   restaurant-service:
     build: ./services/restaurant-service
-    restart: always
+    restart: on-failure # <-- CORRECCIÓN AÑADIDA
     env_file:
       - ./.env
     ports:
       - "${RESTAURANT_SERVICE_PORT:-4002}:8080"
-    depends_on: # <-- AÑADIDO: Depende de la base de datos
+    depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
@@ -66,12 +66,12 @@ services:
   # --- Servicio de Pagos ---
   payment-service:
     build: ./services/payment-service
-    restart: always
+    restart: on-failure # <-- CORRECCIÓN AÑADIDA
     env_file:
       - ./.env
     ports:
       - "${PAYMENT_SERVICE_PORT:-4003}:8080"
-    depends_on: # <-- AÑADIDO: Depende de la base de datos
+    depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
@@ -83,7 +83,7 @@ services:
   # --- Servicio del POS ---
   pos-service:
     build: ./services/pos-service
-    restart: always
+    restart: on-failure # <-- CORRECCIÓN AÑADIDA
     env_file:
       - ./.env
     ports:
@@ -91,7 +91,7 @@ services:
     depends_on:
       restaurant-service:
         condition: service_healthy
-      postgres: # <-- AÑADIDO: Depende de la base de datos
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
@@ -102,7 +102,7 @@ services:
   # --- Servicio del PAC ---
   pac-service:
     build: ./services/pac-service
-    restart: always
+    restart: on-failure # <-- CORRECCIÓN AÑADIDA
     env_file:
       - ./.env
     ports:
@@ -110,7 +110,7 @@ services:
     depends_on:
       restaurant-service:
         condition: service_healthy
-      postgres: # <-- AÑADIDO: Depende de la base de datos
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
@@ -121,7 +121,7 @@ services:
   # --- API Gateway (El único punto de entrada público) ---
   api-gateway:
     build: ./api-gateway
-    restart: always
+    restart: always # El gateway siempre debe intentar reiniciar
     env_file:
       - ./.env
     ports:
