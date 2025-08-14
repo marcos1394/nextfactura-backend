@@ -1,4 +1,4 @@
-# docker-compose.yml (Versión Final y Robusta)
+# docker-compose.yml (Versión Final, Robusta y con Periodo de Gracia)
 services:
   # --- Servicio de Cache para tokens, sesiones, etc. ---
   redis:
@@ -41,11 +41,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${AUTH_SERVICE_PORT:-4001}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s # <-- CORRECCIÓN FINAL: Periodo de gracia
 
   # --- Servicio de Restaurantes ---
   restaurant-service:
@@ -59,11 +59,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${RESTAURANT_SERVICE_PORT:-4002}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s # <-- CORRECCIÓN FINAL: Periodo de gracia
       
   # --- Servicio de Pagos ---
   payment-service:
@@ -77,11 +77,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAYMENT_SERVICE_PORT:-4003}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s # <-- CORRECCIÓN FINAL: Periodo de gracia
 
   # --- Servicio del POS ---
   pos-service:
@@ -97,11 +97,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${POS_SERVICE_PORT:-4004}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s # <-- CORRECCIÓN FINAL: Periodo de gracia
       
   # --- Servicio del PAC ---
   pac-service:
@@ -117,11 +117,11 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAC_SERVICE_PORT:-4005}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s # <-- CORRECCIÓN FINAL: Periodo de gracia
       
   # --- API Gateway (El único punto de entrada público) ---
   api-gateway:
