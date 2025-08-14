@@ -1,4 +1,4 @@
-# docker-compose.yml (Versión Completa y Corregida)
+# docker-compose.yml (Versión Final Corregida)
 services:
   # --- Servicio de Cache para tokens, sesiones, etc. ---
   redis:
@@ -30,18 +30,19 @@ services:
   # --- Servicio de Autenticación ---
   auth-service:
     build: ./services/auth-service
-    restart: on-failure # <-- CORRECCIÓN AÑADIDA
+    restart: on-failure
     env_file:
       - ./.env
     ports:
-      - "${AUTH_SERVICE_PORT:-4001}:8080"
+      - "${AUTH_SERVICE_PORT:-4001}:4001"
     depends_on:
       redis:
         condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      # CORREGIDO: Ahora usa la variable del puerto correcto
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:${AUTH_SERVICE_PORT:-4001}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -49,16 +50,17 @@ services:
   # --- Servicio de Restaurantes ---
   restaurant-service:
     build: ./services/restaurant-service
-    restart: on-failure # <-- CORRECCIÓN AÑADIDA
+    restart: on-failure
     env_file:
       - ./.env
     ports:
-      - "${RESTAURANT_SERVICE_PORT:-4002}:8080"
+      - "${RESTAURANT_SERVICE_PORT:-4002}:4002"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      # CORREGIDO: Ahora usa la variable del puerto correcto
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:${RESTAURANT_SERVICE_PORT:-4002}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -66,16 +68,17 @@ services:
   # --- Servicio de Pagos ---
   payment-service:
     build: ./services/payment-service
-    restart: on-failure # <-- CORRECCIÓN AÑADIDA
+    restart: on-failure
     env_file:
       - ./.env
     ports:
-      - "${PAYMENT_SERVICE_PORT:-4003}:8080"
+      - "${PAYMENT_SERVICE_PORT:-4003}:4003"
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      # CORREGIDO: Ahora usa la variable del puerto correcto
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:${PAYMENT_SERVICE_PORT:-4003}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -83,18 +86,19 @@ services:
   # --- Servicio del POS ---
   pos-service:
     build: ./services/pos-service
-    restart: on-failure # <-- CORRECCIÓN AÑADIDA
+    restart: on-failure
     env_file:
       - ./.env
     ports:
-      - "${POS_SERVICE_PORT:-4004}:8080"
+      - "${POS_SERVICE_PORT:-4004}:4004"
     depends_on:
       restaurant-service:
         condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      # CORREGIDO: Ahora usa la variable del puerto correcto
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:${POS_SERVICE_PORT:-4004}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -102,18 +106,19 @@ services:
   # --- Servicio del PAC ---
   pac-service:
     build: ./services/pac-service
-    restart: on-failure # <-- CORRECCIÓN AÑADIDA
+    restart: on-failure
     env_file:
       - ./.env
     ports:
-      - "${PAC_SERVICE_PORT:-4005}:8080"
+      - "${PAC_SERVICE_PORT:-4005}:4005"
     depends_on:
       restaurant-service:
         condition: service_healthy
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/health || exit 1"]
+      # CORREGIDO: Ahora usa la variable del puerto correcto
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:${PAC_SERVICE_PORT:-4005}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -121,7 +126,7 @@ services:
   # --- API Gateway (El único punto de entrada público) ---
   api-gateway:
     build: ./api-gateway
-    restart: always # El gateway siempre debe intentar reiniciar
+    restart: always
     env_file:
       - ./.env
     ports:
