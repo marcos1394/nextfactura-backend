@@ -1,4 +1,4 @@
-# docker-compose.yml (Versión Final Corregida)
+# docker-compose.yml (Versión Final y Robusta)
 services:
   # --- Servicio de Cache para tokens, sesiones, etc. ---
   redis:
@@ -41,8 +41,8 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Ahora usa la variable del puerto correcto
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:${AUTH_SERVICE_PORT:-4001}/health || exit 1"]
+      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${AUTH_SERVICE_PORT:-4001}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -59,8 +59,8 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Ahora usa la variable del puerto correcto
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:${RESTAURANT_SERVICE_PORT:-4002}/health || exit 1"]
+      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${RESTAURANT_SERVICE_PORT:-4002}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -77,8 +77,8 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Ahora usa la variable del puerto correcto
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:${PAYMENT_SERVICE_PORT:-4003}/health || exit 1"]
+      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAYMENT_SERVICE_PORT:-4003}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -97,8 +97,8 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Ahora usa la variable del puerto correcto
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:${POS_SERVICE_PORT:-4004}/health || exit 1"]
+      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${POS_SERVICE_PORT:-4004}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -117,8 +117,8 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      # CORREGIDO: Ahora usa la variable del puerto correcto
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:${PAC_SERVICE_PORT:-4005}/health || exit 1"]
+      # CORREGIDO: Usando 127.0.0.1 en lugar de localhost
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAC_SERVICE_PORT:-4005}/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
