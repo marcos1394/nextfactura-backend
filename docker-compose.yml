@@ -1,14 +1,14 @@
-# docker-compose.yml (Versión Final con network_mode: host)
+# docker-compose.yml (Versión Final con Script de Espera)
 services:
   redis:
     image: redis:alpine
     restart: always
-    network_mode: host # <-- AÑADIDO
+    network_mode: host
 
   postgres:
     image: postgres:15-alpine
     restart: always
-    network_mode: host # <-- AÑADIDO
+    network_mode: host
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -19,44 +19,50 @@ services:
   auth-service:
     build: ./services/auth-service
     restart: on-failure
-    network_mode: host # <-- AÑADIDO
+    network_mode: host
     env_file:
       - ./.env
-  
+    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
+
   restaurant-service:
     build: ./services/restaurant-service
     restart: on-failure
-    network_mode: host # <-- AÑADIDO
+    network_mode: host
     env_file:
       - ./.env
+    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
 
   payment-service:
     build: ./services/payment-service
     restart: on-failure
-    network_mode: host # <-- AÑADIDO
+    network_mode: host
     env_file:
       - ./.env
+    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
 
   pos-service:
     build: ./services/pos-service
     restart: on-failure
-    network_mode: host # <-- AÑADIDO
+    network_mode: host
     env_file:
       - ./.env
+    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
       
   pac-service:
     build: ./services/pac-service
     restart: on-failure
-    network_mode: host # <-- AÑADIDO
+    network_mode: host
     env_file:
       - ./.env
+    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
       
   api-gateway:
     build: ./api-gateway
     restart: always
-    network_mode: host # <-- AÑADIDO
+    network_mode: host
     env_file:
       - ./.env
+    # No necesita esperar a la BD, así que no lleva 'command'
 
 volumes:
   postgres_data:
