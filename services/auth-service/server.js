@@ -247,21 +247,67 @@ app.get('/health', (req, res) => {
 });
 
 
-// POST /login
+// auth-service/server.js
+
+// POST /login (Versión Final con Chequeo de Estado)
 app.post('/login', async (req, res) => {
     const { email, password } = req.body;
     try {
+        // 1. Validar credenciales del usuario
         const user = await User.findOne({ where: { email: email.toLowerCase() } });
+
         if (!user || !await bcrypt.compare(password, user.password)) {
             return res.status(401).json({ success: false, message: 'Credenciales inválidas.' });
         }
+
         if (user.isTwoFactorEnabled) {
-            return res.status(200).json({ success: true, twoFactorRequired: true, message: "Por favor, ingresa tu código de autenticación." });
+            return res.status(200).json({ 
+                success: true, 
+                twoFactorRequired: true, 
+                message: "Por favor, ingresa tu código de autenticación." 
+            });
         }
-        const jti = crypto.randomUUID(); // Genera un ID único para el token
-        const tokenPayload = { id: user.id, email: user.email, role: user.role, jti: jti }; // Añade el jti al payload
-        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, {expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
-        res.json({ success: true, token: `Bearer ${token}` })
+        
+        // --- INICIO DE LA LÓGICA DE ESTADO ---
+
+        // 2. Buscamos una suscripción activa para este usuario en 'plan_purchases'
+        const activeSubscription = await PlanPurchase.findOne({
+            where: { 
+                userId: user.id,
+                status: 'active' // Buscamos un plan con estado 'active'
+            }
+        });
+
+        // 3. Contamos si el usuario tiene al menos un restaurante configurado
+        const restaurantCount = await Restaurant.count({
+            where: { userId: user.id }
+        });
+
+        // 4. Creamos el objeto de estado que el frontend necesita
+        const userStatus = {
+            hasPlan: !!activeSubscription, // true si encontró una suscripción activa
+            hasRestaurant: restaurantCount > 0 // true si tiene 1 o más restaurantes
+        };
+
+        // --- FIN DE LA LÓGICA DE ESTADO ---
+
+        const jti = crypto.randomUUID();
+        const tokenPayload = { id: user.id, email: user.email, role: user.role, jti: jti };
+        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+
+        // Preparamos la respuesta del usuario sin datos sensibles
+        const userResponse = user.toJSON();
+        delete userResponse.password;
+        // ... elimina cualquier otro campo sensible ...
+        
+        // Enviamos el token, el usuario Y el nuevo objeto de estado
+        res.json({ 
+            success: true, 
+            token: `Bearer ${token}`, 
+            user: userResponse,
+            status: userStatus // <-- ENVIAMOS EL ESTADO AL FRONTEND
+        });
+
     } catch (error) {
         console.error('[Auth-Service /login] Error:', error);
         res.status(500).json({ success: false, message: 'Error interno del servidor.' });
