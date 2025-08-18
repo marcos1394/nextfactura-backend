@@ -191,6 +191,10 @@ Permission.belongsToMany(Role, { through: 'RolePermissions' });
 User.hasMany(PlanPurchase, { foreignKey: 'userId' });
 PlanPurchase.belongsTo(User, { foreignKey: 'userId' });
 
+// Un usuario puede tener muchos restaurantes.
+User.hasMany(Restaurant, { foreignKey: 'userId' });
+Restaurant.belongsTo(User, { foreignKey: 'userId' });
+
 // --- Funciones Auxiliares ---
 async function sendEmail(to, subject, html) {
     if (!resend) {
