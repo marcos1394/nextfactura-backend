@@ -1,156 +1,62 @@
-# docker-compose.yml (Versión con healthcheck de auth-service desactivado)
+# docker-compose.yml (Versión Final con network_mode: host)
 services:
-  # --- Servicio de Cache para tokens, sesiones, etc. ---
   redis:
     image: redis:alpine
     restart: always
-    hostname: redis
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+    network_mode: host # <-- AÑADIDO
 
-  # --- Servicio de Base de Datos PostgreSQL ---
   postgres:
     image: postgres:15-alpine
     restart: always
+    network_mode: host # <-- AÑADIDO
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports: # <-- AÑADE ESTA LÍNEA Y LA SIGUIENTE
-    - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # --- Servicio de Autenticación ---
+  
   auth-service:
     build: ./services/auth-service
     restart: on-failure
+    network_mode: host # <-- AÑADIDO
     env_file:
       - ./.env
-    ports:
-      - "${AUTH_SERVICE_PORT:-4001}:4001"
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    # --- HEALTHCHECK DESACTIVADO TEMPORALMENTE ---
-    # El chequeo de salud para este servicio estaba fallando a pesar de que los
-    # logs mostraban un arranque exitoso. Se comenta para permitir que el
-    # resto del sistema se levante y poder realizar pruebas.
-    # healthcheck:
-    #   test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${AUTH_SERVICE_PORT:-4001}/health || exit 1"]
-    #   interval: 10s
-    #   timeout: 5s
-    #   retries: 5
-    #   start_period: 30s
-
-  # --- Servicio de Restaurantes ---
+  
   restaurant-service:
     build: ./services/restaurant-service
     restart: on-failure
+    network_mode: host # <-- AÑADIDO
     env_file:
       - ./.env
-    ports:
-      - "${RESTAURANT_SERVICE_PORT:-4002}:4002"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${RESTAURANT_SERVICE_PORT:-4002}/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-      
-  # --- Servicio de Pagos ---
+
   payment-service:
     build: ./services/payment-service
     restart: on-failure
+    network_mode: host # <-- AÑADIDO
     env_file:
       - ./.env
-    ports:
-      - "${PAYMENT_SERVICE_PORT:-4003}:4003"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAYMENT_SERVICE_PORT:-4003}/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
 
-  # --- Servicio del POS ---
   pos-service:
     build: ./services/pos-service
     restart: on-failure
+    network_mode: host # <-- AÑADIDO
     env_file:
       - ./.env
-    ports:
-      - "${POS_SERVICE_PORT:-4004}:4004"
-    depends_on:
-      restaurant-service:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${POS_SERVICE_PORT:-4004}/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
       
-  # --- Servicio del PAC ---
   pac-service:
     build: ./services/pac-service
     restart: on-failure
+    network_mode: host # <-- AÑADIDO
     env_file:
       - ./.env
-    ports:
-      - "${PAC_SERVICE_PORT:-4005}:4005"
-    depends_on:
-      restaurant-service:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAC_SERVICE_PORT:-4005}/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
       
-  # --- API Gateway (El único punto de entrada público) ---
   api-gateway:
     build: ./api-gateway
     restart: always
+    network_mode: host # <-- AÑADIDO
     env_file:
       - ./.env
-    ports:
-      - "${API_GATEWAY_PORT:-8080}:8080"
-    depends_on:
-      # Se elimina la dependencia del healthcheck de auth-service
-      # para permitir que el gateway inicie.
-      # auth-service:
-      #   condition: service_healthy
-      restaurant-service:
-        condition: service_healthy
-      payment-service:
-        condition: service_healthy
-      pos-service:
-        condition: service_healthy
-      pac-service:
-        condition: service_healthy
 
-# --- Volúmenes para persistir datos ---
 volumes:
   postgres_data:
