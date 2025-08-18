@@ -1,4 +1,4 @@
-# docker-compose.yml (Versión Final con Script de Espera)
+# docker-compose.yml (Versión Final Definitiva con Espera Integrada)
 services:
   redis:
     image: redis:alpine
@@ -22,7 +22,7 @@ services:
     network_mode: host
     env_file:
       - ./.env
-    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
+    command: /bin/sh -c "while ! nc -z localhost 5432; do echo 'Auth-Service waiting for DB...' && sleep 1; done; node server.js"
 
   restaurant-service:
     build: ./services/restaurant-service
@@ -30,7 +30,7 @@ services:
     network_mode: host
     env_file:
       - ./.env
-    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
+    command: /bin/sh -c "while ! nc -z localhost 5432; do echo 'Restaurant-Service waiting for DB...' && sleep 1; done; node server.js"
 
   payment-service:
     build: ./services/payment-service
@@ -38,7 +38,7 @@ services:
     network_mode: host
     env_file:
       - ./.env
-    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
+    command: /bin/sh -c "while ! nc -z localhost 5432; do echo 'Payment-Service waiting for DB...' && sleep 1; done; node server.js"
 
   pos-service:
     build: ./services/pos-service
@@ -46,7 +46,7 @@ services:
     network_mode: host
     env_file:
       - ./.env
-    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
+    command: /bin/sh -c "while ! nc -z localhost 5432; do echo 'POS-Service waiting for DB...' && sleep 1; done; node server.js"
       
   pac-service:
     build: ./services/pac-service
@@ -54,7 +54,7 @@ services:
     network_mode: host
     env_file:
       - ./.env
-    command: ["wait-for-it", "localhost", "5432", "--", "node", "server.js"] # <-- AÑADIDO
+    command: /bin/sh -c "while ! nc -z localhost 5432; do echo 'PAC-Service waiting for DB...' && sleep 1; done; node server.js"
       
   api-gateway:
     build: ./api-gateway
@@ -62,7 +62,7 @@ services:
     network_mode: host
     env_file:
       - ./.env
-    # No necesita esperar a la BD, así que no lleva 'command'
+    # No necesita esperar a la BD, así que no lleva 'command' especial
 
 volumes:
   postgres_data:
