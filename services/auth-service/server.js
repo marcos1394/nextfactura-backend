@@ -142,6 +142,43 @@ const AuditLog = sequelize.define('AuditLog', {
     details: { type: DataTypes.TEXT }
 });
 
+const PlanPurchase = sequelize.define('PlanPurchase', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    planId: { type: DataTypes.UUID, allowNull: false },
+    origin: { type: DataTypes.STRING, allowNull: false },
+    status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'pending' },
+    price: { type: DataTypes.DOUBLE, allowNull: false },
+    purchaseDate: { type: DataTypes.DATE },
+    expirationDate: { type: DataTypes.DATE },
+    paymentId: { type: DataTypes.STRING, unique: true },
+    paymentProvider: { type: DataTypes.STRING, defaultValue: 'mercadopago' },
+    preferenceId: { type: DataTypes.STRING }
+}, { 
+    tableName: 'plan_purchases', 
+    timestamps: true 
+});
+
+const Restaurant = sequelize.define('Restaurant', {
+    id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    name: { type: DataTypes.STRING, allowNull: false },
+    address: { type: DataTypes.STRING },
+    logoUrl: { type: DataTypes.STRING },
+    // ... el resto de tus campos de restaurants ...
+    connectionHost: { type: DataTypes.STRING },
+    connectionPort: { type: DataTypes.STRING },
+    connectionUser: { type: DataTypes.STRING },
+    connectionPassword: { type: DataTypes.STRING },
+    connectionDbName: { type: DataTypes.STRING },
+    vpnUsername: { type: DataTypes.STRING },
+    vpnPassword: { type: DataTypes.STRING },
+    deletedAt: { type: DataTypes.DATE }
+}, { 
+    tableName: 'restaurants', 
+    timestamps: true 
+});
+
 // --- Definición de Relaciones ---
 User.belongsToMany(Role, { through: 'UserRoles' });
 Role.belongsToMany(User, { through: 'UserRoles' });
@@ -149,6 +186,10 @@ Role.belongsToMany(User, { through: 'UserRoles' });
 Role.belongsToMany(Permission, { through: 'RolePermissions' });
 Permission.belongsToMany(Role, { through: 'RolePermissions' });
 
+// --- INICIO: RELACIONES NUEVAS ---
+// Un usuario puede tener muchas compras de planes.
+User.hasMany(PlanPurchase, { foreignKey: 'userId' });
+PlanPurchase.belongsTo(User, { foreignKey: 'userId' });
 
 // --- Funciones Auxiliares ---
 async function sendEmail(to, subject, html) {
