@@ -82,7 +82,7 @@ if (POS_SERVICE_URL) {
 }
 
 // El puerto se define en el Dockerfile o aquí, pero tu log decía 10000, así que lo respetamos.
-const PORT = process.env.PORT || 10000; 
+const PORT = process.env.API_GATEWAY_PORT || 8080;
 
 app.listen(PORT, () => {
   console.log(`🚀 API Gateway profesional escuchando en el puerto ${PORT}`);
