@@ -142,6 +142,16 @@ const AuditLog = sequelize.define('AuditLog', {
     details: { type: DataTypes.TEXT }
 });
 
+const Plan = sequelize.define('Plan', {
+    id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING, allowNull: false, unique: true },
+    price: { type: DataTypes.FLOAT, allowNull: false },
+    features: { type: DataTypes.JSONB, allowNull: true }, // Ej: {"reports": true, "users": 5}
+    mercadopagoId: { type: DataTypes.STRING, allowNull: true }, // ID del plan en Mercado Pago si se usan suscripciones
+    isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
+}, { tableName: 'plans', timestamps: true });
+
+
 const PlanPurchase = sequelize.define('PlanPurchase', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     userId: { type: DataTypes.UUID, allowNull: false },
@@ -179,6 +189,8 @@ const Restaurant = sequelize.define('Restaurant', {
     timestamps: true 
 });
 
+
+
 // --- Definición de Relaciones ---
 User.belongsToMany(Role, { through: 'UserRoles' });
 Role.belongsToMany(User, { through: 'UserRoles' });
@@ -194,6 +206,10 @@ PlanPurchase.belongsTo(User, { foreignKey: 'userId' });
 // Un usuario puede tener muchos restaurantes.
 User.hasMany(Restaurant, { foreignKey: 'userId' });
 Restaurant.belongsTo(User, { foreignKey: 'userId' });
+
+// --- RELACIÓN FALTANTE AÑADIDA ---
+Plan.hasMany(PlanPurchase, { foreignKey: 'planId' });
+PlanPurchase.belongsTo(Plan, { foreignKey: 'planId' });
 
 // --- Funciones Auxiliares ---
 async function sendEmail(to, subject, html) {
@@ -535,17 +551,35 @@ app.post('/logout', authenticateToken, async (req, res) => {
     }
 });
 
-// --- Arranque del Servidor ---
+// --- ARRANQUE DEL SERVIDOR (VERSIÓN ROBUSTA) ---
 const PORT = process.env.AUTH_SERVICE_PORT || 3001;
+
 const startServer = async () => {
     try {
         await sequelize.authenticate();
         console.log('[Auth-Service] Conexión con la base de datos establecida exitosamente.');
-        await sequelize.sync({ alter: true }); 
+        console.log('[Auth-Service] Sincronizando modelos...');
+        
+        // Sincroniza en un orden lógico para evitar errores de dependencias
+        await User.sync({ alter: true });
+        await Role.sync({ alter: true });
+        await Permission.sync({ alter: true });
+        await Plan.sync({ alter: true }); // Ahora que el modelo existe, podemos sincronizarlo
+
+        // Modelos que dependen de los anteriores
+        await Restaurant.sync({ alter: true });
+        await PlanPurchase.sync({ alter: true });
+        await AuditLog.sync({ alter: true });
+
+        // Sync final para tablas intermedias (ej. UserRoles)
+        await sequelize.sync({ alter: true });
+
         console.log('[Auth-Service] Modelos sincronizados con la base de datos.');
+        
         app.listen(PORT, () => {
             console.log(`🚀 Auth-Service profesional escuchando en el puerto ${PORT}`);
         });
+
     } catch (error) {
         console.error('[Auth-Service] Error catastrófico al iniciar:', error);
         process.exit(1);
