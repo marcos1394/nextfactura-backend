@@ -553,35 +553,23 @@ app.post('/logout', authenticateToken, async (req, res) => {
 
 // --- ARRANQUE DEL SERVIDOR (VERSIÓN ROBUSTA) ---
 const PORT = process.env.AUTH_SERVICE_PORT || 3001;
+// Reemplaza la función startServer en cada servicio con esta versión
 
 const startServer = async () => {
     try {
+        // 1. Solo verifica que la conexión a la base de datos funciona.
         await sequelize.authenticate();
-        console.log('[Auth-Service] Conexión con la base de datos establecida exitosamente.');
-        console.log('[Auth-Service] Sincronizando modelos...');
+        console.log(`[Service] Conexión con la base de datos establecida exitosamente.`);
+
+        // 2. La sincronización de modelos se ha eliminado.
+        // El servicio ahora asume que las tablas ya existen y están correctas.
         
-        // Sincroniza en un orden lógico para evitar errores de dependencias
-        await User.sync({ alter: true });
-        await Role.sync({ alter: true });
-        await Permission.sync({ alter: true });
-        await Plan.sync({ alter: true }); // Ahora que el modelo existe, podemos sincronizarlo
-
-        // Modelos que dependen de los anteriores
-        await Restaurant.sync({ alter: true });
-        await PlanPurchase.sync({ alter: true });
-        await AuditLog.sync({ alter: true });
-
-        // Sync final para tablas intermedias (ej. UserRoles)
-        await sequelize.sync({ alter: true });
-
-        console.log('[Auth-Service] Modelos sincronizados con la base de datos.');
-        
+        // 3. Inicia el servidor Express para escuchar peticiones.
         app.listen(PORT, () => {
-            console.log(`🚀 Auth-Service profesional escuchando en el puerto ${PORT}`);
+            console.log(`🚀 Service escuchando en el puerto ${PORT}`);
         });
-
     } catch (error) {
-        console.error('[Auth-Service] Error catastrófico al iniciar:', error);
+        console.error(`[Service] Error catastrófico al iniciar:`, error);
         process.exit(1);
     }
 };

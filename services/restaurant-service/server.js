@@ -466,25 +466,23 @@ app.get('/restaurants/:restaurantId/portal', authenticateToken, async (req, res)
 
 // --- Arranque del Servidor (Versión Robusta) ---
 const PORT = process.env.RESTAURANT_SERVICE_PORT || 4002;
+// Reemplaza la función startServer en cada servicio con esta versión
 
 const startServer = async () => {
     try {
+        // 1. Solo verifica que la conexión a la base de datos funciona.
         await sequelize.authenticate();
-        console.log('[Restaurant-Service] Conexión con la BD establecida.');
+        console.log(`[Service] Conexión con la base de datos establecida exitosamente.`);
 
-        console.log('[Restaurant-Service] Sincronizando modelos...');
-        // Sincroniza los modelos en orden de dependencia
-        await User.sync({ alter: true });
-        await Restaurant.sync({ alter: true });
-        await FiscalData.sync({ alter: true });
-        await PortalConfig.sync({ alter: true });
-        console.log('[Restaurant-Service] Modelos sincronizados.');
-
+        // 2. La sincronización de modelos se ha eliminado.
+        // El servicio ahora asume que las tablas ya existen y están correctas.
+        
+        // 3. Inicia el servidor Express para escuchar peticiones.
         app.listen(PORT, () => {
-            console.log(`🚀 Restaurant-Service escuchando en el puerto ${PORT}`);
+            console.log(`🚀 Service escuchando en el puerto ${PORT}`);
         });
     } catch (error) {
-        console.error('[Restaurant-Service] Error catastrófico al iniciar:', error);
+        console.error(`[Service] Error catastrófico al iniciar:`, error);
         process.exit(1);
     }
 };

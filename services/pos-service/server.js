@@ -133,6 +133,25 @@ app.get('/query/:restaurantId/estaciones', authenticateToken, dataQueryHandler('
 
 // --- Arranque del Servidor ---
 const PORT = process.env.POS_SERVICE_PORT || 3004;
-app.listen(PORT, () => {
-    console.log(`🚀 POS-Service profesional escuchando en el puerto ${PORT}`);
-});
+// Reemplaza la función startServer en cada servicio con esta versión
+
+const startServer = async () => {
+    try {
+        // 1. Solo verifica que la conexión a la base de datos funciona.
+        await sequelize.authenticate();
+        console.log(`[Service] Conexión con la base de datos establecida exitosamente.`);
+
+        // 2. La sincronización de modelos se ha eliminado.
+        // El servicio ahora asume que las tablas ya existen y están correctas.
+        
+        // 3. Inicia el servidor Express para escuchar peticiones.
+        app.listen(PORT, () => {
+            console.log(`🚀 Service escuchando en el puerto ${PORT}`);
+        });
+    } catch (error) {
+        console.error(`[Service] Error catastrófico al iniciar:`, error);
+        process.exit(1);
+    }
+};
+
+startServer();
