@@ -1,33 +1,23 @@
-# docker-compose.yml (Versión Final Definitiva)
+# docker-compose.yml (Versión Final Definitiva con Nginx como Gateway)
 services:
-  # --- NGINX: NUEVO SERVICIO (Actúa como Frontend Server y API Gateway) ---
   nginx:
-    build: ./nginx # Construye desde una nueva carpeta 'nginx'
+    build: ./nginx
     restart: always
     ports:
-      - "80:80"   # Puerto público para HTTP
-      - "443:443" # Puerto público para HTTPS
+      - "80:80"
+      - "443:443"
     volumes:
-      # Monta los archivos del frontend compilado para que Nginx los sirva (solo lectura)
       - /var/www/html:/var/www/html:ro
-      # Monta los certificados SSL para que Nginx pueda usarlos (solo lectura)
       - /etc/letsencrypt:/etc/letsencrypt:ro
     networks:
       - app-net
     depends_on:
-      # Nginx no arrancará hasta que todos los servicios de backend estén saludables
-      auth-service:
-        condition: service_healthy
-      restaurant-service:
-        condition: service_healthy
-      payment-service:
-        condition: service_healthy
-      pos-service:
-        condition: service_healthy
-      pac-service:
-        condition: service_healthy
+      auth-service: { condition: service_healthy }
+      restaurant-service: { condition: service_healthy }
+      payment-service: { condition: service_healthy }
+      pos-service: { condition: service_healthy }
+      pac-service: { condition: service_healthy }
 
-  # --- SERVICIOS DE BASE ---
   redis:
     image: redis:alpine
     restart: always
@@ -50,7 +40,6 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
   
-  # --- MICROSERVICIOS DE APLICACIÓN (Ahora son privados) ---
   auth-service:
     build: ./services/auth-service
     restart: on-failure
@@ -129,7 +118,6 @@ services:
       retries: 5
       start_period: 30s
       
-# --- Definición de la Red y el Volumen ---
 volumes:
   postgres_data:
 
