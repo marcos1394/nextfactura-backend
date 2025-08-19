@@ -7,7 +7,7 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const sql = require('mssql');
-const fetch = require('node-fetch');
+const fetch = require('node-fetch'); // Si usas una versión de Node < 18, si no, puedes usar el fetch nativo.
 
 const app = express();
 app.use(cors());
@@ -24,7 +24,7 @@ async function getConnectedPool(connectionConfig) {
             database: connectionConfig.database,
             port: parseInt(connectionConfig.port || '1433', 10),
             options: {
-                trustServerCertificate: true, // Necesario para conexiones a SQL Server sin un certificado validado
+                trustServerCertificate: true, // Necesario para conexiones sin un certificado validado
             },
             pool: {
                 max: 10,
@@ -38,7 +38,7 @@ async function getConnectedPool(connectionConfig) {
         console.log(`[POS-Service] Conexión exitosa a ${connectionConfig.host}`);
         return pool;
     } catch (error) {
-        console.error(`[POS-Service] Error al conectar a la BD del POS:`, error);
+        console.error(`[POS-Service] Error al conectar a la BD del POS:`, error.message);
         throw new Error('No se pudo establecer la conexión con la base de datos del restaurante.');
     }
 }
@@ -58,8 +58,7 @@ const authenticateToken = (req, res, next) => {
 
 // --- Rutas del Servicio de POS ---
 
-// POST /test-connection - Endpoint para validar credenciales de conexión al POS.
-// Este endpoint es llamado por el `restaurant-service`.
+// Endpoint para validar credenciales de conexión al POS.
 app.post('/test-connection', async (req, res) => {
     const { connectionData } = req.body;
     if (!connectionData) {
@@ -69,7 +68,7 @@ app.post('/test-connection', async (req, res) => {
     let pool;
     try {
         pool = await getConnectedPool(connectionData);
-        await pool.close(); // Cerramos la conexión inmediatamente si fue exitosa.
+        await pool.close(); 
         res.status(200).json({ success: true, message: 'Conexión con SoftRestaurant exitosa.' });
     } catch (error) {
         if (pool) await pool.close();
@@ -77,9 +76,7 @@ app.post('/test-connection', async (req, res) => {
     }
 });
 
-// --- Endpoints de Consulta de Datos ---
-// Estos endpoints obtienen la configuración del restaurante y luego ejecutan la consulta.
-
+// Handler genérico para ejecutar consultas SQL.
 const dataQueryHandler = (query) => async (req, res) => {
     const { restaurantId } = req.params;
     
@@ -114,44 +111,30 @@ const dataQueryHandler = (query) => async (req, res) => {
     }
 };
 
+// Endpoint de salud para Docker
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-
-// Se definen las rutas y las consultas SQL correspondientes
+// Definición de rutas y las consultas SQL correspondientes
 app.get('/query/:restaurantId/products', authenticateToken, dataQueryHandler('SELECT [id], [Code], [Name], [StartDate], [EndDate], [HasTransferredTax], [HasTransferredIEPS], [Complement] FROM [products] ORDER BY [id] ASC'));
 app.get('/query/:restaurantId/cheques', authenticateToken, dataQueryHandler('SELECT [totalbebidas], [totalalimentos], [totalsindescuento], [efectivo], [tarjeta], [total], [totalarticulos], [estacion], [idturno], [tipodeservicio], [orden], [cambio], [impreso], [pagado], [mesa], [nopersonas], [cierre], [fecha], [numcheque], [folio] FROM [cheques] ORDER BY [fecha] DESC'));
 app.get('/query/:restaurantId/bitacora', authenticateToken, dataQueryHandler('SELECT [fecha], [usuario], [evento], [valores], [estacion], [idempresa], [seriefolio], [numcheque], [usuariosolicita], [tipoalerta] FROM [bitacorasistema] ORDER BY [fecha] DESC'));
-// --- Endpoints Faltantes Añadidos ---
 app.get('/query/:restaurantId/cheqdet', authenticateToken, dataQueryHandler('SELECT [movimiento], [idproducto], [precio], [cantidad], [hora], [procesado] FROM [cheqdet] ORDER BY [hora] DESC'));
 app.get('/query/:restaurantId/chequespagos', authenticateToken, dataQueryHandler('SELECT [folio], [idformadepago], [importe], [propina], [tipodecambio] FROM [chequespagos] ORDER BY [folio] DESC'));
 app.get('/query/:restaurantId/declaracioncajero', authenticateToken, dataQueryHandler('SELECT [idturno], [idformadepago], [importedeclarado] FROM [declaracioncajero] ORDER BY [importedeclarado] DESC'));
 app.get('/query/:restaurantId/estaciones', authenticateToken, dataQueryHandler('SELECT [idestacion], [descripcion], [serie], [ip], [directoriorespaldo], [mensajespera], [rutatemoral], [PostLastOnline] FROM [estaciones]'));
 
+// --- Arranque del Servidor (Versión Corregida) ---
+const PORT = process.env.POS_SERVICE_PORT || 4004;
 
-
-// --- Arranque del Servidor ---
-const PORT = process.env.POS_SERVICE_PORT || 3004;
-// Reemplaza la función startServer en cada servicio con esta versión
-
-const startServer = async () => {
-    try {
-        // 1. Solo verifica que la conexión a la base de datos funciona.
-        await sequelize.authenticate();
-        console.log(`[Service] Conexión con la base de datos establecida exitosamente.`);
-
-        // 2. La sincronización de modelos se ha eliminado.
-        // El servicio ahora asume que las tablas ya existen y están correctas.
-        
-        // 3. Inicia el servidor Express para escuchar peticiones.
-        app.listen(PORT, () => {
-            console.log(`🚀 Service escuchando en el puerto ${PORT}`);
-        });
-    } catch (error) {
-        console.error(`[Service] Error catastrófico al iniciar:`, error);
-        process.exit(1);
-    }
+// Esta función ahora solo inicia el servidor Express. No necesita 'async' ni 'try/catch' complejos.
+const startServer = () => {
+    // Este servicio no necesita conectar a la base de datos principal al iniciar,
+    // solo necesita arrancar su servidor web para escuchar peticiones.
+    app.listen(PORT, () => {
+        console.log(`🚀 POS-Service profesional escuchando en el puerto ${PORT}`);
+    });
 };
 
 startServer();
