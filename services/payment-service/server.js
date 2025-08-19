@@ -97,40 +97,47 @@ async function seedPlans() {
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
     dialect: 'postgres',
     logging: false,
-    dialectOptions: {
-      ssl: { require: true, rejectUnauthorized: false }
-    }
+    // Elimina dialectOptions si no usas SSL
 });
 
-// --- Modelos de Datos (Propiedad de este servicio) ---
+// --- Modelos de Datos ---
+
+// AÑADIDO: Se define el modelo User para establecer la relación
+const User = sequelize.define('User', {
+    id: { type: DataTypes.UUID, primaryKey: true },
+}, { tableName: 'users', timestamps: false });
 
 const Plan = sequelize.define('Plan', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
     name: { type: DataTypes.STRING, allowNull: false, unique: true },
     price: { type: DataTypes.FLOAT, allowNull: false },
-    features: { type: DataTypes.JSONB, allowNull: true }, // Ej: {"reports": true, "users": 5}
-    mercadopagoId: { type: DataTypes.STRING, allowNull: true }, // ID del plan en Mercado Pago si se usan suscripciones
+    features: { type: DataTypes.JSONB, allowNull: true },
+    mercadopagoId: { type: DataTypes.STRING, allowNull: true },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
 }, { tableName: 'plans', timestamps: true });
 
 const PlanPurchase = sequelize.define('PlanPurchase', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    userId: { type: DataTypes.UUID, allowNull: false }, // FK al ID del User en auth-service
-    planId: { type: DataTypes.UUID, allowNull: false, references: { model: Plan, key: 'id' } },
-    origin: { type: DataTypes.STRING, allowNull: false }, // NUEVO: Se guarda el origen de la compra
-    status: { type: DataTypes.STRING, defaultValue: 'pending', allowNull: false }, // pending, processing, active, failed, cancelled
+    userId: { type: DataTypes.UUID, allowNull: false },
+    planId: { type: DataTypes.UUID, allowNull: false },
+    origin: { type: DataTypes.STRING, allowNull: false },
+    status: { type: DataTypes.STRING, defaultValue: 'pending', allowNull: false },
     price: { type: DataTypes.FLOAT, allowNull: false },
     purchaseDate: { type: DataTypes.DATE },
     expirationDate: { type: DataTypes.DATE },
-    paymentId: { type: DataTypes.STRING, allowNull: true, unique: true }, // ID del pago en Mercado Pago
+    paymentId: { type: DataTypes.STRING, allowNull: true, unique: true },
     paymentProvider: { type: DataTypes.STRING, defaultValue: 'mercadopago' },
     preferenceId: { type: DataTypes.STRING, allowNull: true }
 }, { tableName: 'plan_purchases', timestamps: true });
 
+
+// --- Definición de Relaciones ---
 Plan.hasMany(PlanPurchase, { foreignKey: 'planId' });
 PlanPurchase.belongsTo(Plan, { foreignKey: 'planId' });
 
-
+// Una Compra de Plan pertenece a un Usuario
+User.hasMany(PlanPurchase, { foreignKey: 'userId' });
+PlanPurchase.belongsTo(User, { foreignKey: 'userId' });
 // --- Middleware de Autenticación ---
 // Extrae el ID de usuario del token JWT que el Gateway debe reenviar.
 const authenticateToken = (req, res, next) => {
@@ -411,46 +418,26 @@ app.get('/admin/purchases', authenticateToken, authenticateAdmin, async (req, re
 });
 
 
+// --- Arranque del Servidor (Versión Robusta) ---
+const PORT = process.env.PAYMENT_SERVICE_PORT || 4003;
 
-const PORT = process.env.PAYMENT_SERVICE_PORT || 3003;
 const startServer = async () => {
     try {
         await sequelize.authenticate();
         console.log('[Payment-Service] Conexión con la BD establecida.');
-        await sequelize.sync({ alter: true });
+
+        console.log('[Payment-Service] Sincronizando modelos...');
+        // Sincroniza los modelos en orden de dependencia
+        await User.sync({ alter: true });
+        await Plan.sync({ alter: true });
+        await PlanPurchase.sync({ alter: true });
         console.log('[Payment-Service] Modelos sincronizados.');
-        
-        // --- NUEVO: Llamar al Seeder de planes ---
+
+        // Ejecuta el seeder DESPUÉS de que las tablas existan
         await seedPlans();
         
-        // --- NUEVO: Tarea programada para recordatorios de expiración ---
-        // Se ejecuta todos los días a las 8:00 AM
-        cron.schedule('0 8 * * *', async () => {
-            console.log('[Cron] Ejecutando tarea de recordatorio de expiración...');
-            const sevenDaysFromNow = new Date();
-            sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-
-            const expiringPurchases = await PlanPurchase.findAll({
-                where: {
-                    status: 'active',
-                    expirationDate: {
-                        [Op.lt]: sevenDaysFromNow,
-                        [Op.gt]: new Date()
-                    }
-                }
-            });
-
-            for (const purchase of expiringPurchases) {
-                // Aquí necesitaríamos llamar al auth-service para obtener el email del `purchase.userId`
-                // const userEmail = await getUserEmailById(purchase.userId);
-                // const emailHtml = `...`;
-                // sendEmail(userEmail, 'Tu plan de NextManager está por expirar', emailHtml);
-                console.log(`[Cron] Recordatorio para usuario ${purchase.userId} cuyo plan expira el ${purchase.expirationDate.toLocaleDateString()}`);
-            }
-        });
-        
         app.listen(PORT, () => {
-            console.log(`🚀 Payment-Service profesional escuchando en el puerto ${PORT}`);
+            console.log(`🚀 Payment-Service escuchando en el puerto ${PORT}`);
         });
     } catch (error) {
         console.error('[Payment-Service] Error catastrófico al iniciar:', error);

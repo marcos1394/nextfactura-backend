@@ -86,18 +86,23 @@ function decrypt(text) {
     return decrypted.toString();
 }
 
+// --- Conexión a Base de Datos ---
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
     dialect: 'postgres',
     logging: false,
-    dialectOptions: {
-      ssl: { require: true, rejectUnauthorized: false }
-    }
+    // Elimina dialectOptions si no usas SSL
 });
-// --- Modelos de Datos con Cifrado Automático ---
+
+// --- Modelos de Datos ---
+
+// AÑADIDO: Se define el modelo User para establecer la relación
+const User = sequelize.define('User', {
+    id: { type: DataTypes.UUID, primaryKey: true },
+}, { tableName: 'users', timestamps: false }); // No necesita todos los campos, solo el id
 
 const Restaurant = sequelize.define('Restaurant', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-    userId: { type: DataTypes.UUID, allowNull: false, index: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
     name: { type: DataTypes.STRING, allowNull: false },
     address: { type: DataTypes.STRING },
     logoUrl: { type: DataTypes.STRING },
@@ -106,36 +111,35 @@ const Restaurant = sequelize.define('Restaurant', {
     connectionUser: { type: DataTypes.STRING },
     connectionPassword: {
         type: DataTypes.STRING,
-        get() { return decrypt(this.getDataValue('connectionPassword')); },
-        set(value) { this.setDataValue('connectionPassword', encrypt(value)); }
+        // get() { return decrypt(this.getDataValue('connectionPassword')); },
+        // set(value) { this.setDataValue('connectionPassword', encrypt(value)); }
     },
     connectionDbName: { type: DataTypes.STRING },
     vpnUsername: { type: DataTypes.STRING },
     vpnPassword: {
         type: DataTypes.STRING,
-        get() { return decrypt(this.getDataValue('vpnPassword')); },
-        set(value) { this.setDataValue('vpnPassword', encrypt(value)); }
+        // get() { return decrypt(this.getDataValue('vpnPassword')); },
+        // set(value) { this.setDataValue('vpnPassword', encrypt(value)); }
     }
 }, { tableName: 'restaurants', timestamps: true, paranoid: true });
 
 const FiscalData = sequelize.define('FiscalData', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-    restaurantId: { type: DataTypes.UUID, allowNull: false, references: { model: Restaurant, key: 'id' } },
+    restaurantId: { type: DataTypes.UUID, allowNull: false },
     rfc: { type: DataTypes.STRING, allowNull: false },
     fiscalAddress: { type: DataTypes.STRING, allowNull: false },
     csdPassword: {
         type: DataTypes.STRING,
-        get() { return decrypt(this.getDataValue('csdPassword')); },
-        set(value) { this.setDataValue('csdPassword', encrypt(value)); }
+        // get() { return decrypt(this.getDataValue('csdPassword')); },
+        // set(value) { this.setDataValue('csdPassword', encrypt(value)); }
     },
     csdCertificateUrl: { type: DataTypes.STRING },
     csdKeyUrl: { type: DataTypes.STRING }
 }, { tableName: 'fiscal_data', timestamps: true, paranoid: true });
 
-// LÓGICA CORREGIDA: Un portal pertenece a UN restaurante.
 const PortalConfig = sequelize.define('PortalConfig', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
-    restaurantId: { type: DataTypes.UUID, allowNull: false, unique: true, references: { model: Restaurant, key: 'id' } },
+    restaurantId: { type: DataTypes.UUID, allowNull: false, unique: true },
     portalName: { type: DataTypes.STRING, allowNull: false },
     portalLogoUrl: { type: DataTypes.STRING },
     customDomain: { type: DataTypes.STRING, unique: true, allowNull: true },
@@ -143,12 +147,18 @@ const PortalConfig = sequelize.define('PortalConfig', {
     secondaryColor: { type: DataTypes.STRING, defaultValue: '#6B7280' }
 }, { tableName: 'portal_configs', timestamps: true });
 
-// Relaciones
+// --- Definición de Relaciones ---
+// Un Restaurante pertenece a un Usuario
+User.hasMany(Restaurant, { foreignKey: 'userId' });
+Restaurant.belongsTo(User, { foreignKey: 'userId' });
+
+// Un Restaurante tiene un solo dato fiscal
 Restaurant.hasOne(FiscalData, { foreignKey: 'restaurantId', onDelete: 'CASCADE' });
 FiscalData.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
+
+// Un Restaurante tiene una sola configuración de portal
 Restaurant.hasOne(PortalConfig, { foreignKey: 'restaurantId', onDelete: 'CASCADE' });
 PortalConfig.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
-
 
 
 // --- Middleware de Autenticación ---
@@ -179,8 +189,6 @@ app.post('/test-crash', (req, res) => {
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
-
-
 
 // --- (en restaurant-service/server.js) ---
 
@@ -456,16 +464,24 @@ app.get('/restaurants/:restaurantId/portal', authenticateToken, async (req, res)
 });
 
 
-// --- Arranque del Servidor ---
-const PORT = process.env.RESTAURANT_SERVICE_PORT || 3002;
+// --- Arranque del Servidor (Versión Robusta) ---
+const PORT = process.env.RESTAURANT_SERVICE_PORT || 4002;
+
 const startServer = async () => {
     try {
         await sequelize.authenticate();
         console.log('[Restaurant-Service] Conexión con la BD establecida.');
-        await sequelize.sync({ alter: true });
+
+        console.log('[Restaurant-Service] Sincronizando modelos...');
+        // Sincroniza los modelos en orden de dependencia
+        await User.sync({ alter: true });
+        await Restaurant.sync({ alter: true });
+        await FiscalData.sync({ alter: true });
+        await PortalConfig.sync({ alter: true });
         console.log('[Restaurant-Service] Modelos sincronizados.');
+
         app.listen(PORT, () => {
-            console.log(`🚀 Restaurant-Service profesional escuchando en el puerto ${PORT}`);
+            console.log(`🚀 Restaurant-Service escuchando en el puerto ${PORT}`);
         });
     } catch (error) {
         console.error('[Restaurant-Service] Error catastrófico al iniciar:', error);
