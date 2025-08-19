@@ -1,10 +1,40 @@
-# docker-compose.yml (Versión Final con Red Explícita)
+# docker-compose.yml (Versión Final Definitiva)
 services:
+  # --- NGINX: NUEVO SERVICIO (Actúa como Frontend Server y API Gateway) ---
+  nginx:
+    build: ./nginx # Construye desde una nueva carpeta 'nginx'
+    restart: always
+    ports:
+      - "80:80"   # Puerto público para HTTP
+      - "443:443" # Puerto público para HTTPS
+    volumes:
+      # Monta los archivos del frontend compilado para que Nginx los sirva (solo lectura)
+      - /var/www/html:/var/www/html:ro
+      # Monta los certificados SSL para que Nginx pueda usarlos (solo lectura)
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    networks:
+      - app-net
+    depends_on:
+      # Nginx no arrancará hasta que todos los servicios de backend estén saludables
+      auth-service:
+        condition: service_healthy
+      restaurant-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      pos-service:
+        condition: service_healthy
+      pac-service:
+        condition: service_healthy
+
+  # --- SERVICIOS DE BASE ---
   redis:
     image: redis:alpine
     restart: always
     networks:
       - app-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
 
   postgres:
     image: postgres:15-alpine
@@ -17,75 +47,88 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - app-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
   
+  # --- MICROSERVICIOS DE APLICACIÓN (Ahora son privados) ---
   auth-service:
     build: ./services/auth-service
     restart: on-failure
     env_file: [".env"]
     depends_on:
-      - postgres
-      - redis
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
     networks:
       - app-net
-    command: /bin/sh -c "while ! nc -z postgres 5432; do echo 'Auth-Service waiting for DB...' && sleep 1; done; node server.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${AUTH_SERVICE_PORT:-4001}/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   restaurant-service:
     build: ./services/restaurant-service
     restart: on-failure
     env_file: [".env"]
     depends_on:
-      - postgres
+      postgres: { condition: service_healthy }
     networks:
       - app-net
-    command: /bin/sh -c "while ! nc -z postgres 5432; do sleep 1; done; node server.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${RESTAURANT_SERVICE_PORT:-4002}/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   payment-service:
     build: ./services/payment-service
     restart: on-failure
     env_file: [".env"]
     depends_on:
-      - postgres
+      postgres: { condition: service_healthy }
     networks:
       - app-net
-    command: /bin/sh -c "while ! nc -z postgres 5432; do sleep 1; done; node server.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAYMENT_SERVICE_PORT:-4003}/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   pos-service:
     build: ./services/pos-service
     restart: on-failure
     env_file: [".env"]
     depends_on:
-      - postgres
-      - restaurant-service
+      postgres: { condition: service_healthy }
+      restaurant-service: { condition: service_healthy }
     networks:
       - app-net
-    command: /bin/sh -c "while ! nc -z postgres 5432; do sleep 1; done; node server.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${POS_SERVICE_PORT:-4004}/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
       
   pac-service:
     build: ./services/pac-service
     restart: on-failure
     env_file: [".env"]
     depends_on:
-      - postgres
-      - restaurant-service
+      postgres: { condition: service_healthy }
+      restaurant-service: { condition: service_healthy }
     networks:
       - app-net
-    command: /bin/sh -c "while ! nc -z postgres 5432; do sleep 1; done; node server.js"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAC_SERVICE_PORT:-4005}/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
       
-  api-gateway:
-    build: ./api-gateway
-    restart: always
-    env_file: [".env"]
-    ports:
-      - "${API_GATEWAY_PORT:-8080}:8080"
-    depends_on:
-      - auth-service
-      - restaurant-service
-      - payment-service
-      - pos-service
-      - pac-service
-    networks:
-      - app-net
-
 # --- Definición de la Red y el Volumen ---
 volumes:
   postgres_data:
