@@ -1,6 +1,7 @@
 // --- services/pac-service/server.js (Versión Profesional y Completa) ---
 
 require('dotenv').config();
+const logger = require('./logger'); // Importa tu nuevo logger
 
 // --- Imports de Librerías ---
 const express = require('express');
@@ -323,11 +324,14 @@ const startServer = async () => {
         
         // 3. Inicia el servidor Express para escuchar peticiones.
         app.listen(PORT, () => {
-            console.log(`🚀 Service escuchando en el puerto ${PORT}`);
+            logger.info(`🚀 Service escuchando en el puerto ${PORT}`);
+
         });
     } catch (error) {
-        console.error(`[Service] Error catastrófico al iniciar:`, error);
-        process.exit(1);
+        logger.error('Error catastrófico al iniciar', { 
+    service: 'pac-service', // Identifica el servicio
+    error: error.message, 
+    stack: error.stack })
     }
 };
 

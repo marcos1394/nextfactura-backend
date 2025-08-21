@@ -1,7 +1,7 @@
 // --- services/pos-service/server.js (Versión Profesional y Completa) ---
 
 require('dotenv').config();
-
+const logger = require('./logger'); // Importa tu nuevo logger
 // --- Imports de Librerías ---
 const express = require('express');
 const cors = require('cors');
@@ -133,7 +133,7 @@ const startServer = () => {
     // Este servicio no necesita conectar a la base de datos principal al iniciar,
     // solo necesita arrancar su servidor web para escuchar peticiones.
     app.listen(PORT, () => {
-        console.log(`🚀 POS-Service profesional escuchando en el puerto ${PORT}`);
+            logger.info(`🚀 Service escuchando en el puerto ${PORT}`);
     });
 };
 
