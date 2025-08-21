@@ -44,6 +44,8 @@ services:
     build: ./services/auth-service
     restart: on-failure
     env_file: [".env"]
+    volumes: # <-- AÑADE ESTA SECCIÓN
+    - ./logs/auth-service:/app/logs
     depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
     networks: [app-net]
     healthcheck:
@@ -59,6 +61,8 @@ services:
     env_file: [".env"]
     depends_on: { postgres: { condition: service_healthy } }
     networks: [app-net]
+    volumes: # <-- AÑADE ESTA SECCIÓN
+    - ./logs/restaurant-service:/app/logs
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${RESTAURANT_SERVICE_PORT:-4002}/health || exit 1"]
       interval: 10s
@@ -70,6 +74,8 @@ services:
     build: ./services/payment-service
     restart: on-failure
     env_file: [".env"]
+    volumes: # <-- AÑADE ESTA SECCIÓN
+    - ./logs/payment-service:/app/logs
     depends_on: { postgres: { condition: service_healthy } }
     networks: [app-net]
     healthcheck:
@@ -85,6 +91,8 @@ services:
     env_file: [".env"]
     depends_on: { postgres: { condition: service_healthy }, restaurant-service: { condition: service_healthy } }
     networks: [app-net]
+    volumes: # <-- AÑADE ESTA SECCIÓN
+    - ./logs/pos-service:/app/logs
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${POS_SERVICE_PORT:-4004}/health || exit 1"]
       interval: 10s
@@ -98,6 +106,8 @@ services:
     env_file: [".env"]
     depends_on: { postgres: { condition: service_healthy }, restaurant-service: { condition: service_healthy } }
     networks: [app-net]
+    volumes: # <-- AÑADE ESTA SECCIÓN
+    - ./logs/pac-service:/app/logs
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAC_SERVICE_PORT:-4005}/health || exit 1"]
       interval: 10s
