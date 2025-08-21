@@ -16,7 +16,8 @@
     "jsonwebtoken": "^9.0.2",
     "mssql": "^10.0.2",
     "node-fetch": "^2.7.0",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "winston": "^3.17.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

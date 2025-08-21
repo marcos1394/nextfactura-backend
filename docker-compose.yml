@@ -1,16 +1,13 @@
-# docker-compose.yml (Versión Final Definitiva con Nginx como Gateway)
+# docker-compose.yml (Versión Final y Completa)
 services:
   nginx:
     build: ./nginx
     restart: always
-    ports:
-      - "80:80"
-      - "443:443"
+    ports: ["80:80", "443:443"]
     volumes:
       - /var/www/html:/var/www/html:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
-    networks:
-      - app-net
+    networks: [app-net]
     depends_on:
       auth-service: { condition: service_healthy }
       restaurant-service: { condition: service_healthy }
@@ -21,10 +18,12 @@ services:
   redis:
     image: redis:alpine
     restart: always
-    networks:
-      - app-net
+    networks: [app-net]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
     image: postgres:15-alpine
@@ -33,22 +32,20 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - app-net
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [app-net]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
   
   auth-service:
     build: ./services/auth-service
     restart: on-failure
     env_file: [".env"]
-    depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
-    networks:
-      - app-net
+    depends_on: { postgres: { condition: service_healthy }, redis: { condition: service_healthy } }
+    networks: [app-net]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${AUTH_SERVICE_PORT:-4001}/health || exit 1"]
       interval: 10s
@@ -60,10 +57,8 @@ services:
     build: ./services/restaurant-service
     restart: on-failure
     env_file: [".env"]
-    depends_on:
-      postgres: { condition: service_healthy }
-    networks:
-      - app-net
+    depends_on: { postgres: { condition: service_healthy } }
+    networks: [app-net]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${RESTAURANT_SERVICE_PORT:-4002}/health || exit 1"]
       interval: 10s
@@ -75,10 +70,8 @@ services:
     build: ./services/payment-service
     restart: on-failure
     env_file: [".env"]
-    depends_on:
-      postgres: { condition: service_healthy }
-    networks:
-      - app-net
+    depends_on: { postgres: { condition: service_healthy } }
+    networks: [app-net]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAYMENT_SERVICE_PORT:-4003}/health || exit 1"]
       interval: 10s
@@ -90,11 +83,8 @@ services:
     build: ./services/pos-service
     restart: on-failure
     env_file: [".env"]
-    depends_on:
-      postgres: { condition: service_healthy }
-      restaurant-service: { condition: service_healthy }
-    networks:
-      - app-net
+    depends_on: { postgres: { condition: service_healthy }, restaurant-service: { condition: service_healthy } }
+    networks: [app-net]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${POS_SERVICE_PORT:-4004}/health || exit 1"]
       interval: 10s
@@ -106,11 +96,8 @@ services:
     build: ./services/pac-service
     restart: on-failure
     env_file: [".env"]
-    depends_on:
-      postgres: { condition: service_healthy }
-      restaurant-service: { condition: service_healthy }
-    networks:
-      - app-net
+    depends_on: { postgres: { condition: service_healthy }, restaurant-service: { condition: service_healthy } }
+    networks: [app-net]
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:${PAC_SERVICE_PORT:-4005}/health || exit 1"]
       interval: 10s
