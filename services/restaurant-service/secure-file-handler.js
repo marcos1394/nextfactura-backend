@@ -106,6 +106,7 @@ const secureUpload = multer({
         fieldSize: 1024 * 1024 // 1MB para campos de texto
     },
     fileFilter: (req, file, cb) => {
+        console.log(`[DEBUG] Archivo: ${file.fieldname}, MIME Type Recibido: ${file.mimetype}`); 
         try {
             validateFile(file.fieldname, file);
             cb(null, true);
