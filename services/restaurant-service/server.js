@@ -480,3 +480,32 @@ app.get('/subdomain/check/:name', authenticateToken, async (req, res) => {
         });
     }
 });
+
+// --- ARRANQUE DEL SERVIDOR (VERSIÓN ROBUSTA) ---
+const PORT = process.env.RESTAURANT_SERVICE_PORT || 4002;
+// Reemplaza la función startServer en cada servicio con esta versión
+
+const startServer = async () => {
+    try {
+        // 1. Solo verifica que la conexión a la base de datos funciona.
+        await sequelize.authenticate();
+        console.log(`[Service] Conexión con la base de datos establecida exitosamente.`);
+
+        // 2. La sincronización de modelos se ha eliminado.
+        // El servicio ahora asume que las tablas ya existen y están correctas.
+        
+        // 3. Inicia el servidor Express para escuchar peticiones.
+        app.listen(PORT, () => {
+            logger.info(`🚀 Service escuchando en el puerto ${PORT}`);
+
+        });
+    } catch (error) {
+       logger.error('Error catastrófico al iniciar', { 
+    service: 'restaurant-service', // Identifica el servicio
+    error: error.message, 
+    stack: error.stack 
+});
+    }
+};
+
+startServer();
