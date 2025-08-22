@@ -8,9 +8,14 @@ const {
     createSecureDirectories,
     deleteRestaurantFiles 
 } = require('./secure-file-handler');
+const express = require('express');
+
 
 // Importar el módulo de cPanel para subdominios
 const { createCpanelSubdomain } = require('./cpanelApi');
+const app = express();
+app.use(cors());
+app.use(bodyParser.json());
 
 // Inicializar directorios seguros al arrancar
 createSecureDirectories().catch(console.error);
