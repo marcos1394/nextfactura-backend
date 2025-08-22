@@ -9,6 +9,7 @@ const {
     deleteRestaurantFiles 
 } = require('./secure-file-handler');
 const express = require('express');
+const cors = require('cors');
 
 
 // Importar el módulo de cPanel para subdominios
