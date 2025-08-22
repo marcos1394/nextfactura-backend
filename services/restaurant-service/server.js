@@ -10,6 +10,7 @@ const {
 } = require('./secure-file-handler');
 const express = require('express');
 const cors = require('cors');
+const bodyParser = require('body-parser');
 
 
 // Importar el módulo de cPanel para subdominios
