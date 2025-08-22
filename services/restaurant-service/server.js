@@ -13,6 +13,8 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 
 const redis = require('redis'); // <-- Asegúrate de que esta línea esté
+const logger = require('./logger'); // Importa tu nuevo logger
+
 
 
 // Importar el módulo de cPanel para subdominios
