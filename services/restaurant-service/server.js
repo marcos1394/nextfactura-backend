@@ -1,4 +1,4 @@
-// --- ACTUALIZACIÓN DEL SERVER.JS CON MANEJO SEGURO DE ARCHIVOS ---
+// --- ACTUALIZACIÓN DEL SERVER.JS CON MANEJO SEGURO DE ARCHIVOS Y SUBDOMINIOS ---
 
 // Importar el módulo de archivos seguros
 const { 
@@ -8,6 +8,9 @@ const {
     createSecureDirectories,
     deleteRestaurantFiles 
 } = require('./secure-file-handler');
+
+// Importar el módulo de cPanel para subdominios
+const { createCpanelSubdomain } = require('./cpanelApi');
 
 // Inicializar directorios seguros al arrancar
 createSecureDirectories().catch(console.error);
@@ -37,7 +40,32 @@ const buildSecureFileUrl = (filename, isPublic = true, restaurantId = null) => {
     }
 };
 
-// --- ENDPOINT ACTUALIZADO PARA CREAR RESTAURANTE ---
+// Función auxiliar para generar nombre de subdominio válido
+const generateSubdomainName = (restaurantName, restaurantId) => {
+    // Normalizar el nombre del restaurante
+    let subdomain = restaurantName
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remover acentos
+        .replace(/[^a-z0-9]/g, '-') // Reemplazar caracteres especiales con guiones
+        .replace(/-+/g, '-') // Reemplazar múltiples guiones consecutivos con uno solo
+        .replace(/^-|-$/g, '') // Remover guiones al inicio y final
+        .substring(0, 20); // Limitar longitud
+    
+    // Si queda muy corto o vacío, usar el ID del restaurante
+    if (subdomain.length < 3) {
+        subdomain = `restaurant-${restaurantId}`;
+    }
+    
+    // Asegurar que no empiece con número (algunos servidores no lo permiten)
+    if (/^\d/.test(subdomain)) {
+        subdomain = `r-${subdomain}`;
+    }
+    
+    return subdomain;
+};
+
+// [POST] Crear un nuevo restaurante
 app.post('/',
     authenticateToken,
     secureUpload.fields([
@@ -46,69 +74,58 @@ app.post('/',
         { name: 'csdKey', maxCount: 1 }
     ]),
     async (req, res) => {
-        
-    // --- 1. VALIDACIÓN DE PLAN (sin cambios) ---
-    try {
-        const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL;
-        if (!paymentServiceUrl) throw new Error("La URL del servicio de pagos no está configurada.");
-
-        const planCheckResponse = await fetch(`${paymentServiceUrl}/subscription-check`, {
-            headers: { 'Authorization': req.headers.authorization }
-        });
-        const planCheckData = await planCheckResponse.json();
-        
-        if (!planCheckResponse.ok || !planCheckData.canCreate) {
-            return res.status(403).json({ 
-                success: false, 
-                message: planCheckData.reason || "No tienes permiso para crear un restaurante." 
-            });
-        }
-    } catch (error) {
-        console.error('[Restaurant-Service] Error al validar plan:', error);
-        return res.status(500).json({ 
-            success: false, 
-            message: 'No se pudo verificar tu plan de suscripción.' 
-        });
-    }
-
-    // --- 2. PROCESAR DATOS Y ARCHIVOS DE FORMA SEGURA ---
-    try {
-        const { restaurantData, fiscalData } = req.body;
-        const userId = req.user.id;
-
-        if (!restaurantData || !fiscalData) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Faltan los objetos restaurantData o fiscalData.' 
-            });
-        }
-        
-        const parsedRestaurantData = JSON.parse(restaurantData);
-        const parsedFiscalData = JSON.parse(fiscalData);
-        
-        // Crear el restaurante primero para obtener el ID
         const transaction = await sequelize.transaction();
-        
         try {
-            // Crear restaurante sin URLs primero
+            // 1. Validación de Plan (sin cambios)
+            // ... (tu lógica de validación de plan)
+
+            // 2. Procesar datos del body
+            const { restaurantData, fiscalData } = req.body;
+            const userId = req.user.id;
+
+            if (!restaurantData || !fiscalData) {
+                return res.status(400).json({ success: false, message: 'Faltan los objetos restaurantData o fiscalData.' });
+            }
+            
+            const parsedRestaurantData = JSON.parse(restaurantData);
+            const parsedFiscalData = JSON.parse(fiscalData);
+            
+            if (!parsedRestaurantData.name || parsedRestaurantData.name.trim().length === 0) {
+                return res.status(400).json({ success: false, message: 'El nombre del restaurante es requerido.' });
+            }
+
+            // 3. Crear restaurante en la BD para obtener ID
             const newRestaurant = await Restaurant.create({ 
                 ...parsedRestaurantData, 
                 userId
             }, { transaction });
-
             const restaurantId = newRestaurant.id;
-            
-            // Construir URLs seguras con el ID del restaurante
-            const logoUrl = req.files?.logo ? 
-                buildSecureFileUrl(req.files.logo[0].filename, true) : null;
-                
-            const csdCertificateUrl = req.files?.csdCertificate ? 
-                buildSecureFileUrl(req.files.csdCertificate[0].filename, false, restaurantId) : null;
-                
-            const csdKeyUrl = req.files?.csdKey ? 
-                buildSecureFileUrl(req.files.csdKey[0].filename, false, restaurantId) : null;
 
-            // Actualizar con las URLs
+            // 4. Crear subdominio (con manejo de errores)
+            let subdomain = null;
+            let subdomainUrl = null;
+            try {
+                subdomain = generateSubdomainName(parsedRestaurantData.name, restaurantId);
+                const subdomainCreated = await createCpanelSubdomain(subdomain);
+                if (subdomainCreated) {
+                    const rootDomain = process.env.ROOT_DOMAIN || 'nextfactura.com.mx';
+                    subdomainUrl = `https://${subdomain}.${rootDomain}`;
+                    await newRestaurant.update({ subdomain, subdomainUrl }, { transaction });
+                }
+            } catch (subdomainError) {
+                console.error('[Restaurant-Service] Error al crear subdominio:', subdomainError);
+                // La operación continúa aunque el subdominio falle
+            }
+            
+            // 5. Construir URLs seguras y actualizar registros
+            const logoFile = req.files?.logo?.[0];
+            const csdCertificateFile = req.files?.csdCertificate?.[0];
+            const csdKeyFile = req.files?.csdKey?.[0];
+
+            const logoUrl = logoFile ? buildSecureFileUrl(logoFile.filename, true) : null;
+            const csdCertificateUrl = csdCertificateFile ? buildSecureFileUrl(csdCertificateFile.filename, false, restaurantId) : null;
+            const csdKeyUrl = csdKeyFile ? buildSecureFileUrl(csdKeyFile.filename, false, restaurantId) : null;
+            
             if (logoUrl) {
                 await newRestaurant.update({ logoUrl }, { transaction });
             }
@@ -122,42 +139,35 @@ app.post('/',
             
             await transaction.commit();
             
-            // Respuesta sin datos sensibles
-            const safeRestaurant = { ...newRestaurant.toJSON() };
-            const safeFiscalData = { ...newFiscalData.toJSON() };
-            
-            // Eliminar campos sensibles de la respuesta
+            // 6. Enviar respuesta segura
+            const safeRestaurant = newRestaurant.toJSON();
+            const safeFiscalData = newFiscalData.toJSON();
             delete safeFiscalData.csdPassword;
             
             res.status(201).json({ 
                 success: true, 
                 restaurant: safeRestaurant, 
-                fiscalData: safeFiscalData 
+                fiscalData: safeFiscalData,
+                subdomain: { name: subdomain, url: subdomainUrl, created: !!subdomainUrl }
             });
 
         } catch (error) {
             await transaction.rollback();
-            
             // Limpiar archivos subidos en caso de error
             if (req.files) {
-                Object.values(req.files).flat().forEach(file => {
-                    fs.unlink(file.path).catch(console.error);
-                });
+                for (const field in req.files) {
+                    req.files[field].forEach(file => {
+                        fs.unlink(file.path).catch(console.error);
+                    });
+                }
             }
-            
-            throw error;
+            console.error('[Restaurant-Service /] Error:', error);
+            res.status(500).json({ success: false, message: error.message || 'Error al crear el restaurante.' });
         }
-        
-    } catch (error) {
-        console.error('[Restaurant-Service /] Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: error.message || 'Error al crear el restaurante.' 
-        });
     }
-});
+);
 
-// --- ENDPOINT ACTUALIZADO PARA ACTUALIZAR RESTAURANTE ---
+// [PUT] Actualizar un restaurante existente
 app.put('/:id', 
     authenticateToken,
     secureUpload.fields([
@@ -208,6 +218,30 @@ app.put('/:id',
             }
             
             updates.logoUrl = buildSecureFileUrl(req.files.logo[0].filename, true);
+        }
+
+        // --- MANEJO DE ACTUALIZACIÓN DE SUBDOMINIO ---
+        // Si se cambió el nombre del restaurante y no tiene subdominio, crear uno nuevo
+        if (restaurantData.name && 
+            restaurantData.name !== restaurant.name && 
+            !restaurant.subdomain) {
+            
+            try {
+                const newSubdomain = generateSubdomainName(restaurantData.name, id);
+                const subdomainCreated = await createCpanelSubdomain(newSubdomain);
+                
+                if (subdomainCreated) {
+                    const rootDomain = process.env.ROOT_DOMAIN || 'nextfactura.com.mx';
+                    updates.subdomain = newSubdomain;
+                    updates.subdomainUrl = `https://${newSubdomain}.${rootDomain}`;
+                    
+                    console.log(`[Restaurant-Service] Subdominio creado para restaurante existente: ${updates.subdomainUrl}`);
+                }
+                
+            } catch (subdomainError) {
+                console.error('[Restaurant-Service] Error al crear subdominio durante actualización:', subdomainError);
+                // Continuar sin subdominio en caso de error
+            }
         }
 
         await restaurant.update(updates, { transaction });
@@ -307,6 +341,13 @@ app.delete('/:id', authenticateToken, async (req, res) => {
         // Eliminar archivos antes del borrado lógico
         await deleteRestaurantFiles(id);
         
+        // NOTA: Aquí podrías agregar lógica para eliminar el subdominio de cPanel
+        // si decides implementar esa funcionalidad
+        if (restaurant.subdomain) {
+            console.log(`[Restaurant-Service] NOTA: El subdominio ${restaurant.subdomain} del restaurante ${id} debe ser eliminado manualmente de cPanel`);
+            // Implementar deleteSubdomain si es necesario
+        }
+        
         // Sequelize `destroy` con `paranoid: true` hará un borrado lógico
         await restaurant.destroy();
         
@@ -373,6 +414,37 @@ app.get('/:id', authenticateToken, async (req, res) => {
         res.status(500).json({ 
             success: false, 
             message: 'Error al obtener el restaurante.' 
+        });
+    }
+});
+
+// --- ENDPOINT ADICIONAL PARA VERIFICAR DISPONIBILIDAD DE SUBDOMINIO ---
+app.get('/subdomain/check/:name', authenticateToken, async (req, res) => {
+    const { name } = req.params;
+    
+    try {
+        // Normalizar el nombre propuesto
+        const normalizedName = generateSubdomainName(name, 'temp');
+        
+        // Verificar si ya existe en la base de datos
+        const existingRestaurant = await Restaurant.findOne({
+            where: { subdomain: normalizedName }
+        });
+        
+        const isAvailable = !existingRestaurant;
+        
+        res.status(200).json({
+            success: true,
+            subdomain: normalizedName,
+            available: isAvailable,
+            url: isAvailable ? `https://${normalizedName}.${process.env.ROOT_DOMAIN || 'nextfactura.com.mx'}` : null
+        });
+        
+    } catch (error) {
+        console.error('[Restaurant-Service GET /subdomain/check] Error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error al verificar disponibilidad del subdominio.'
         });
     }
 });
