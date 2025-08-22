@@ -57,12 +57,20 @@ const validateFile = (fieldName, file) => {
     }
     
     // Validar extensión (doble verificación)
-    const allowedExtensions = config.allowedTypes.map(type => mime.extension(type)).filter(Boolean);
-    const fileExtension = path.extname(file.originalname).toLowerCase().slice(1);
-    
-    if (!allowedExtensions.includes(fileExtension)) {
-        throw new Error(`Extensión de archivo inválida para ${fieldName}`);
+    const allowedExtensions = config.allowedTypes.map(type => mime.extension(type)).filter(Boolean);
+    const fileExtension = path.extname(file.originalname).toLowerCase().slice(1);
+
+    // ---> SOLUCIÓN: Añadir manualmente la extensión .key si el campo es csdKey <---
+    if (fieldName === 'csdKey') {
+        if (!allowedExtensions.includes('key')) {
+            allowedExtensions.push('key');
+        }
     }
+    
+    if (!allowedExtensions.includes(fileExtension)) {
+        throw new Error(`Extensión de archivo inválida para ${fieldName}`);
+    }
+    
 };
 
 // Generador de nombres seguros
