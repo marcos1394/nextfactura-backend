@@ -1,4 +1,4 @@
-# docker-compose.yml (Versión Final Definitiva con Logging Persistente)
+# docker-compose.yml
 services:
   nginx:
     build: ./nginx
@@ -7,7 +7,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - /var/www/html:/var/www/html:ro
+      # IMPORTANTE: Cambia la ruta de la izquierda a la ubicación real de la carpeta 'build' de tu frontend.
+      - /home/servidor/nextfactura-frontend/build:/var/www/frontend:ro
+      # Monta los certificados SSL para que Nginx pueda usarlos para HTTPS.
       - /etc/letsencrypt:/etc/letsencrypt:ro
     networks:
       - app-net
@@ -40,7 +42,7 @@ services:
     build: ./services/auth-service
     restart: on-failure
     env_file: [".env"]
-    volumes: # <-- AÑADIDO PARA LOGS
+    volumes:
       - ./logs/auth-service:/app/logs
     depends_on:
       - postgres
@@ -52,7 +54,7 @@ services:
     build: ./services/restaurant-service
     restart: on-failure
     env_file: [".env"]
-    volumes: # <-- AÑADIDO PARA LOGS
+    volumes:
       - ./logs/restaurant-service:/app/logs
     depends_on:
       - postgres
@@ -63,7 +65,7 @@ services:
     build: ./services/payment-service
     restart: on-failure
     env_file: [".env"]
-    volumes: # <-- AÑADIDO PARA LOGS
+    volumes:
       - ./logs/payment-service:/app/logs
     depends_on:
       - postgres
@@ -74,7 +76,7 @@ services:
     build: ./services/pos-service
     restart: on-failure
     env_file: [".env"]
-    volumes: # <-- AÑADIDO PARA LOGS
+    volumes:
       - ./logs/pos-service:/app/logs
     depends_on:
       - postgres
@@ -86,7 +88,7 @@ services:
     build: ./services/pac-service
     restart: on-failure
     env_file: [".env"]
-    volumes: # <-- AÑADIDO PARA LOGS
+    volumes:
       - ./logs/pac-service:/app/logs
     depends_on:
       - postgres
