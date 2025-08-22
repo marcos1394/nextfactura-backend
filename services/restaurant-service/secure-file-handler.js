@@ -32,7 +32,7 @@ const FILE_CONFIGS = {
         directory: 'private'
     },
     csdKey: {
-        allowedTypes: ['application/pkcs8', 'application/x-pem-file', 'text/plain'],
+        allowedTypes: ['application/pkcs8', 'application/x-pem-file', 'text/plain', 'application/octet-stream'],
         maxSize: 10 * 1024, // 10KB
         isPublic: false,
         directory: 'private'
