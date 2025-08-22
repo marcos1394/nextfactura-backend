@@ -11,9 +11,13 @@ const {
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
+require('dotenv').config();
+
 
 const redis = require('redis'); // <-- Asegúrate de que esta línea esté
 const logger = require('./logger'); // Importa tu nuevo logger
+const { Sequelize, DataTypes, Op, UUIDV4 } = require('sequelize');
+
 
 
 
@@ -22,6 +26,183 @@ const { createCpanelSubdomain } = require('./cpanelApi');
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+// --- INICIA BLOQUE NUEVO: Conexión a Redis ---
+const redisClient = redis.createClient({
+    url: process.env.REDIS_URL
+});
+
+redisClient.on('error', err => console.error('[Redis] Client Error', err));
+// Conectamos una sola vez al iniciar el servidor
+redisClient.connect().catch(err => {
+    console.error('[Redis] No se pudo conectar a Redis. Las funciones de logout no estarán disponibles.', err);
+});
+
+// --- Conexión a Base de Datos ---
+const sequelize = new Sequelize(process.env.DATABASE_URL, {
+    dialect: 'postgres',
+    logging: false, // Desactivar logs de SQL en producción
+    dialectOptions: {
+      ssl: { 
+          require: false, 
+          rejectUnauthorized: false // Requerido para Render
+        }
+    }
+});
+
+
+// --- Modelo de Datos: User (Expandido para características profesionales) ---
+const User = sequelize.define('User', {
+    id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING, allowNull: true },
+    email: { type: DataTypes.STRING, allowNull: false, unique: true, validate: { isEmail: true } },
+    password: { type: DataTypes.STRING, allowNull: false },
+    restaurantName: { type: DataTypes.STRING, allowNull: true },
+    phoneNumber: { type: DataTypes.STRING, allowNull: true },
+    role: { type: DataTypes.STRING, defaultValue: 'RestaurantOwners' },
+    // Campos para restablecimiento de contraseña
+    passwordResetToken: { type: DataTypes.STRING, allowNull: true },
+    passwordResetExpires: { type: DataTypes.DATE, allowNull: true },
+    // Campos para 2FA
+    twoFactorSecret: { type: DataTypes.STRING, allowNull: true },
+    isTwoFactorEnabled: { type: DataTypes.BOOLEAN, defaultValue: false },
+    // Para Verificación de Correo Electrónico
+    isEmailVerified: {
+        type: DataTypes.BOOLEAN,
+        defaultValue: false
+    },
+    emailVerificationToken: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+
+    // Para Magic Links
+    magicLinkToken: {
+        type: DataTypes.STRING,
+        allowNull: true
+    },
+    magicLinkExpires: {
+        type: DataTypes.DATE,
+        allowNull: true
+    }
+}, { 
+    tableName: 'users', 
+    timestamps: true 
+});
+
+const Restaurant = sequelize.define('Restaurant', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true,
+  },
+  userId: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false,
+  },
+  address: {
+    type: DataTypes.STRING,
+  },
+  logoUrl: {
+    type: DataTypes.STRING,
+  },
+  connectionHost: { type: DataTypes.STRING },
+  connectionPort: { type: DataTypes.STRING },
+  connectionUser: { type: DataTypes.STRING },
+  connectionPassword: { type: DataTypes.STRING },
+  connectionDbName: { type: DataTypes.STRING },
+  vpnUsername: { type: DataTypes.STRING },
+  vpnPassword: { type: DataTypes.STRING },
+}, {
+  tableName: 'restaurants',
+  timestamps: true,
+  paranoid: true, // Habilita soft delete (usa la columna deletedAt)
+});
+
+// Modelo de Datos Fiscales
+const FiscalData = sequelize.define('FiscalData', {
+  id: {
+    type: DataTypes.UUID,
+    defaultValue: DataTypes.UUIDV4,
+    primaryKey: true,
+  },
+  restaurantId: {
+    type: DataTypes.UUID,
+    allowNull: false,
+  },
+  rfc: { type: DataTypes.STRING },
+  businessName: { type: DataTypes.STRING },
+  fiscalRegime: { type: DataTypes.STRING },
+  csdCertificateUrl: { type: DataTypes.STRING },
+  csdKeyUrl: { type: DataTypes.STRING },
+  csdPassword: { type: DataTypes.STRING },
+}, {
+  tableName: 'fiscal_data',
+  timestamps: true,
+});
+
+
+
+
+
+const Role = sequelize.define('Role', {
+    name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true
+    }
+}, { timestamps: false });
+
+const Permission = sequelize.define('Permission', {
+    name: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        unique: true
+    },
+    description: {
+        type: DataTypes.STRING
+    }
+}, { timestamps: false });
+
+const AuditLog = sequelize.define('AuditLog', {
+    id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
+    userId: { type: DataTypes.UUID, allowNull: true },
+    action: { type: DataTypes.STRING, allowNull: false }, // ej: 'LOGIN_SUCCESS', 'PASSWORD_RESET_REQUEST'
+    ipAddress: { type: DataTypes.STRING },
+    userAgent: { type: DataTypes.STRING },
+    details: { type: DataTypes.TEXT }
+});
+
+const Plan = sequelize.define('Plan', {
+    id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
+    name: { type: DataTypes.STRING, allowNull: false, unique: true },
+    price: { type: DataTypes.FLOAT, allowNull: false },
+    features: { type: DataTypes.JSONB, allowNull: true },
+    mercadopagoId: { type: DataTypes.STRING, allowNull: true },
+    isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
+}, { tableName: 'plans', timestamps: true });
+
+const PlanPurchase = sequelize.define('PlanPurchase', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    planId: { type: DataTypes.UUID, allowNull: false },
+    origin: { type: DataTypes.STRING, allowNull: false },
+    status: { type: DataTypes.STRING, defaultValue: 'pending', allowNull: false },
+    price: { type: DataTypes.FLOAT, allowNull: false },
+    purchaseDate: { type: DataTypes.DATE },
+    expirationDate: { type: DataTypes.DATE },
+    paymentId: { type: DataTypes.STRING, allowNull: true, unique: true },
+    paymentProvider: { type: DataTypes.STRING, defaultValue: 'mercadopago' },
+    preferenceId: { type: DataTypes.STRING, allowNull: true }
+}, { tableName: 'plan_purchases', timestamps: true });
+
+// --- 3. Definición de Relaciones (Asociaciones) ---
+Restaurant.hasOne(FiscalData, { foreignKey: 'restaurantId' });
+FiscalData.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
+
 
 const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
