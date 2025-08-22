@@ -12,12 +12,37 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 
+const redis = require('redis'); // <-- Asegúrate de que esta línea esté
+
 
 // Importar el módulo de cPanel para subdominios
 const { createCpanelSubdomain } = require('./cpanelApi');
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+
+const authenticateToken = async (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) return res.status(401).json({ success: false, message: 'Acceso denegado. Token no proporcionado.' });
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET, { ignoreExpiration: false });
+
+        // Si Redis está conectado, revisa la lista negra
+        if (redisClient.isOpen) {
+            const isBlacklisted = await redisClient.get(`blacklist:${decoded.jti}`);
+            if (isBlacklisted) {
+                return res.status(401).json({ success: false, message: 'Token revocado. Por favor, inicia sesión de nuevo.' });
+            }
+        }
+
+        req.user = decoded;
+        next();
+    } catch (err) {
+        return res.status(403).json({ success: false, message: 'Token inválido o expirado.' });
+    }
+};
 
 // Inicializar directorios seguros al arrancar
 createSecureDirectories().catch(console.error);
