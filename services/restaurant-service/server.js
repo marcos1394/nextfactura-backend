@@ -277,7 +277,7 @@ createSecureDirectories().catch(console.error);
 app.get('/public/:filename', servePublicFile);
 app.get('/restaurants/:restaurantId/private/:filename', authenticateToken, servePrivateFile);
 
-// --- ENDPOINT: CREAR RESTAURANTE ---
+// --- ENDPOINT: CREAR RESTAURANTE (CORREGIDO) ---
 app.post('/',
     authenticateToken,
     secureUpload.fields([
@@ -315,6 +315,15 @@ app.post('/',
                 });
             }
 
+            // --- CAMBIO 1: Añadir validación para fiscalAddress ---
+            if (!parsedFiscalData.fiscalAddress || parsedFiscalData.fiscalAddress.trim().length === 0) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    success: false,
+                    message: 'La dirección fiscal (fiscalAddress) es requerida.'
+                });
+            }
+
             // Crear restaurante
             const newRestaurant = await Restaurant.create({ 
                 ...parsedRestaurantData, 
@@ -323,8 +332,8 @@ app.post('/',
             
             const restaurantId = newRestaurant.id;
 
-            // Crear subdominio
-            let subdomain = null;
+            // --- CAMBIO 2: SECCIÓN DE SUBDOMINIO COMENTADA (Temporalmente deshabilitada) ---
+            /* let subdomain = null;
             let subdomainUrl = null;
             
             try {
@@ -337,9 +346,11 @@ app.post('/',
                     await newRestaurant.update({ subdomain, subdomainUrl }, { transaction });
                 }
             } catch (subdomainError) {
-                console.error('[Restaurant-Service] Error al crear subdominio:', subdomainError);
+                // Ya no lanzamos un error, solo lo registramos por si se quiere revisar después.
+                console.error('[Restaurant-Service] Omitiendo error de subdominio (deshabilitado temporalmente):', subdomainError.message);
             }
-            
+            */
+
             // Procesar archivos
             const logoFile = req.files?.logo?.[0];
             const csdCertificateFile = req.files?.csdCertificate?.[0];
@@ -353,7 +364,7 @@ app.post('/',
                 await newRestaurant.update({ logoUrl }, { transaction });
             }
 
-            // Crear datos fiscales
+            // Crear datos fiscales (el operador '...' ya incluye fiscalAddress si viene en el objeto)
             const newFiscalData = await FiscalData.create({ 
                 ...parsedFiscalData, 
                 restaurantId,
@@ -372,7 +383,8 @@ app.post('/',
                 success: true, 
                 restaurant: safeRestaurant, 
                 fiscalData: safeFiscalData,
-                subdomain: { name: subdomain, url: subdomainUrl, created: !!subdomainUrl }
+                // Mensaje informativo sobre el subdominio
+                subdomain: { name: null, url: null, created: false, message: "La creación de subdominios está deshabilitada temporalmente." }
             });
 
         } catch (error) {
