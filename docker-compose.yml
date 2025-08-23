@@ -1,31 +1,16 @@
-# docker-compose.yml
+# ===================================================================
+# 		  docker-compose.yml para Backend de NextFactura
+# Arquitectura:
+# - Todos los servicios corren en una red privada (app-net).
+# - Solo el API Gateway expone un puerto al exterior (al servidor Ubuntu).
+# - La base de datos guarda sus datos en un volumen para persistencia.
+# - Nginx NO está aquí. Se maneja por separado en el host de Ubuntu.
+# ===================================================================
+version: '3.8'
+
 services:
-  nginx:
-    build: ./nginx
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      # IMPORTANTE: Cambia la ruta de la izquierda a la ubicación real de la carpeta 'build' de tu frontend.
-      - /home/servidor/nextfactura-frontend/build:/var/www/frontend:ro
-      # Monta los certificados SSL para que Nginx pueda usarlos para HTTPS.
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-    networks:
-      - app-net
-    depends_on:
-      - auth-service
-      - restaurant-service
-      - payment-service
-      - pos-service
-      - pac-service
 
-  redis:
-    image: redis:alpine
-    restart: always
-    networks:
-      - app-net
-
+  # --- Base de Datos PostgreSQL ---
   postgres:
     image: postgres:15-alpine
     restart: always
@@ -34,19 +19,56 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
+      # Volumen para que los datos de la BD no se borren al detener el contenedor.
       - postgres_data:/var/lib/postgresql/data
     networks:
       - app-net
-  
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Cache con Redis ---
+  redis:
+    image: redis:alpine
+    restart: always
+    networks:
+      - app-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # --- API Gateway (Único punto de entrada al backend) ---
+  api-gateway:
+    build: ./api-gateway # Asegúrate que esta es la ruta correcta
+    restart: on-failure
+    env_file: [".env"]
+    ports:
+      # El único servicio que expone un puerto al host de Ubuntu.
+      # El Nginx de Ubuntu se conectará a este puerto.
+      - "4000:8080"
+    depends_on:
+      - auth-service
+      - restaurant-service
+      - payment-service
+      - pos-service
+      - pac-service
+    networks:
+      - app-net
+
+  # --- Microservicios Internos (No exponen puertos) ---
   auth-service:
     build: ./services/auth-service
     restart: on-failure
     env_file: [".env"]
-    volumes:
-      - ./logs/auth-service:/app/logs
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - app-net
 
@@ -54,10 +76,9 @@ services:
     build: ./services/restaurant-service
     restart: on-failure
     env_file: [".env"]
-    volumes:
-      - ./logs/restaurant-service:/app/logs
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - app-net
 
@@ -65,10 +86,9 @@ services:
     build: ./services/payment-service
     restart: on-failure
     env_file: [".env"]
-    volumes:
-      - ./logs/payment-service:/app/logs
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - app-net
 
@@ -76,11 +96,11 @@ services:
     build: ./services/pos-service
     restart: on-failure
     env_file: [".env"]
-    volumes:
-      - ./logs/pos-service:/app/logs
     depends_on:
-      - postgres
-      - restaurant-service
+      postgres:
+        condition: service_healthy
+      restaurant-service:
+        condition: service_started # o service_healthy si tiene healthcheck
     networks:
       - app-net
       
@@ -88,17 +108,18 @@ services:
     build: ./services/pac-service
     restart: on-failure
     env_file: [".env"]
-    volumes:
-      - ./logs/pac-service:/app/logs
     depends_on:
-      - postgres
-      - restaurant-service
+      postgres:
+        condition: service_healthy
+      restaurant-service:
+        condition: service_started # o service_healthy si tiene healthcheck
     networks:
       - app-net
       
 # --- Definición de la Red y el Volumen ---
 volumes:
   postgres_data:
+    driver: local
 
 networks:
   app-net:
