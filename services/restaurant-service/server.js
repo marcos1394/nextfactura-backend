@@ -117,6 +117,11 @@ const FiscalData = sequelize.define('FiscalData', {
     businessName: { type: DataTypes.STRING },
     fiscalRegime: { type: DataTypes.STRING },
     csdCertificateUrl: { type: DataTypes.STRING },
+     // --- CAMPO AÑADIDO ---
+    fiscalAddress: { 
+        type: DataTypes.STRING,
+        allowNull: false // Se establece como no nulo para coincidir con la BD
+    },
     csdKeyUrl: { type: DataTypes.STRING },
     csdPassword: { type: DataTypes.STRING }
 }, {
