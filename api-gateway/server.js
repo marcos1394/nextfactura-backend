@@ -2,7 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { createProxyMiddleware, responseInterceptor } = require('http-proxy-middleware');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
 
@@ -32,8 +32,14 @@ app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 const createProxyOptions = (targetUrl, routePrefix) => ({
     target: targetUrl,
     changeOrigin: true,
+
+    // --- CORRECCIÓN FINAL ---
+    // Se añade un timeout de 60 segundos (60000 ms). El nombre correcto de 
+    // la opción es 'timeout'. Esto evita que el proxy aborte peticiones largas.
+    timeout: 60000,
+
     pathRewrite: {
-        // Reescribe la ruta, ej: /api/auth/login -> /login
+        // Reescribe la ruta, ej: /auth/login -> /login
         [`^${routePrefix}`]: '',
     },
     logLevel: 'debug', // Nivel de log del proxy
