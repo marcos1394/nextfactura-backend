@@ -1,16 +1,12 @@
 # ===================================================================
 # 		  docker-compose.yml para Backend de NextFactura
-# Arquitectura:
-# - Todos los servicios corren en una red privada (app-net).
-# - Solo el API Gateway expone un puerto al exterior (al servidor Ubuntu).
-# - La base de datos guarda sus datos en un volumen para persistencia.
-# - Nginx NO está aquí. Se maneja por separado en el host de Ubuntu.
+# Arquitectura Robusta con Healthchecks y Dependencias Condicionales
 # ===================================================================
 version: '3.8'
 
 services:
 
-  # --- Base de Datos PostgreSQL ---
+  # --- Base de Datos PostgreSQL con Healthcheck ---
   postgres:
     image: postgres:15-alpine
     restart: always
@@ -19,38 +15,39 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      # Volumen para que los datos de la BD no se borren al detener el contenedor.
       - postgres_data:/var/lib/postgresql/data
     networks:
       - app-net
     healthcheck:
+      # Este comando verifica si la base de datos está lista para aceptar conexiones.
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # --- Cache con Redis ---
+  # --- Cache con Redis y Healthcheck ---
   redis:
     image: redis:alpine
     restart: always
     networks:
       - app-net
     healthcheck:
+      # Este comando verifica si Redis está respondiendo.
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
 
-  # --- API Gateway (Único punto de entrada al backend) ---
+  # --- API Gateway ---
   api-gateway:
-    build: ./api-gateway # Asegúrate que esta es la ruta correcta
+    build: ./api-gateway
     restart: on-failure
     env_file: [".env"]
     ports:
       # El único servicio que expone un puerto al host de Ubuntu.
-      # El Nginx de Ubuntu se conectará a este puerto.
       - "4000:8080"
     depends_on:
+      # El gateway espera a que los demás servicios al menos hayan arrancado.
       - auth-service
       - restaurant-service
       - payment-service
@@ -58,16 +55,18 @@ services:
       - pac-service
     networks:
       - app-net
-
-  # --- Microservicios Internos (No exponen puertos) ---
+  
+  # --- Microservicios con Dependencias Saludables ---
   auth-service:
     build: ./services/auth-service
     restart: on-failure
     env_file: [".env"]
     depends_on:
       postgres:
+        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
       redis:
+        # <-- CAMBIO CLAVE: No arranca hasta que redis esté "saludable".
         condition: service_healthy
     networks:
       - app-net
@@ -78,6 +77,7 @@ services:
     env_file: [".env"]
     depends_on:
       postgres:
+        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
     networks:
       - app-net
@@ -88,6 +88,7 @@ services:
     env_file: [".env"]
     depends_on:
       postgres:
+        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
     networks:
       - app-net
@@ -98,9 +99,10 @@ services:
     env_file: [".env"]
     depends_on:
       postgres:
+        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
       restaurant-service:
-        condition: service_started # o service_healthy si tiene healthcheck
+        condition: service_started
     networks:
       - app-net
       
@@ -110,9 +112,10 @@ services:
     env_file: [".env"]
     depends_on:
       postgres:
+        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
       restaurant-service:
-        condition: service_started # o service_healthy si tiene healthcheck
+        condition: service_started
     networks:
       - app-net
       
