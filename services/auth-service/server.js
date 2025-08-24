@@ -310,19 +310,41 @@ app.get('/health', (req, res) => {
 
 
 // auth-service/server.js
-
-// POST /login (Versión Final con Chequeo de Estado)
+// POST /login (Versión con Logs Detallados y Medición de Rendimiento)
 app.post('/login', async (req, res) => {
+    // Log para confirmar que la petición LLEGÓ al endpoint.
+    console.log(`[Auth-Service /login] Petición recibida para el email: ${req.body.email}`);
+    
     const { email, password } = req.body;
+    
     try {
-        // 1. Validar credenciales del usuario
+        // --- 1. Búsqueda del Usuario ---
+        console.log(`[Auth-Service /login] Paso 1: Buscando usuario en la base de datos...`);
+        console.time('DB_USER_LOOKUP'); // Inicia el cronómetro
         const user = await User.findOne({ where: { email: email.toLowerCase() } });
+        console.timeEnd('DB_USER_LOOKUP'); // Detiene y muestra el tiempo
 
-        if (!user || !await bcrypt.compare(password, user.password)) {
+        if (!user) {
+            console.warn(`[Auth-Service /login] ADVERTENCIA: Usuario no encontrado con el email: ${email}`);
             return res.status(401).json({ success: false, message: 'Credenciales inválidas.' });
         }
+        console.log(`[Auth-Service /login] ÉXITO: Usuario encontrado con ID: ${user.id}`);
 
+        // --- 1.5. Comparación de Contraseña (la operación más lenta) ---
+        console.log(`[Auth-Service /login] Paso 1.5: Comparando contraseña con bcrypt...`);
+        console.time('BCRYPT_COMPARE'); // Inicia el cronómetro
+        const isMatch = await bcrypt.compare(password, user.password);
+        console.timeEnd('BCRYPT_COMPARE'); // Detiene y muestra el tiempo
+
+        if (!isMatch) {
+            console.warn(`[Auth-Service /login] ADVERTENCIA: Contraseña incorrecta para el usuario: ${email}`);
+            return res.status(401).json({ success: false, message: 'Credenciales inválidas.' });
+        }
+        console.log(`[Auth-Service /login] ÉXITO: La contraseña coincide.`);
+
+        // --- Chequeo de 2FA ---
         if (user.isTwoFactorEnabled) {
+            console.log(`[Auth-Service /login] INFO: 2FA está activado. Solicitando código.`);
             return res.status(200).json({ 
                 success: true, 
                 twoFactorRequired: true, 
@@ -330,48 +352,48 @@ app.post('/login', async (req, res) => {
             });
         }
         
-        // --- INICIO DE LA LÓGICA DE ESTADO ---
-
-        // 2. Buscamos una suscripción activa para este usuario en 'plan_purchases'
+        // --- 2. Búsqueda de Suscripción ---
+        console.log(`[Auth-Service /login] Paso 2: Verificando suscripción activa...`);
         const activeSubscription = await PlanPurchase.findOne({
             where: { 
                 userId: user.id,
-                status: 'active' // Buscamos un plan con estado 'active'
+                status: 'active'
             }
         });
+        console.log(`[Auth-Service /login] INFO: ¿Tiene plan activo? ${!!activeSubscription}`);
 
-        // 3. Contamos si el usuario tiene al menos un restaurante configurado
+        // --- 3. Conteo de Restaurantes ---
+        console.log(`[Auth-Service /login] Paso 3: Contando restaurantes...`);
         const restaurantCount = await Restaurant.count({
             where: { userId: user.id }
         });
-
-        // 4. Creamos el objeto de estado que el frontend necesita
+        console.log(`[Auth-Service /login] INFO: Número de restaurantes: ${restaurantCount}`);
+        
         const userStatus = {
-            hasPlan: !!activeSubscription, // true si encontró una suscripción activa
-            hasRestaurant: restaurantCount > 0 // true si tiene 1 o más restaurantes
+            hasPlan: !!activeSubscription,
+            hasRestaurant: restaurantCount > 0
         };
 
-        // --- FIN DE LA LÓGICA DE ESTADO ---
-
+        // --- 4. Generación del Token ---
+        console.log(`[Auth-Service /login] Paso 4: Generando token JWT...`);
         const jti = crypto.randomUUID();
         const tokenPayload = { id: user.id, email: user.email, role: user.role, jti: jti };
         const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
-
-        // Preparamos la respuesta del usuario sin datos sensibles
+        
         const userResponse = user.toJSON();
         delete userResponse.password;
-        // ... elimina cualquier otro campo sensible ...
         
-        // Enviamos el token, el usuario Y el nuevo objeto de estado
+        console.log(`[Auth-Service /login] ÉXITO FINAL: Enviando respuesta con token y estado del usuario.`);
         res.json({ 
             success: true, 
             token: `Bearer ${token}`, 
             user: userResponse,
-            status: userStatus // <-- ENVIAMOS EL ESTADO AL FRONTEND
+            status: userStatus
         });
 
     } catch (error) {
-        console.error('[Auth-Service /login] Error:', error);
+        // Log para cualquier error inesperado en el proceso.
+        console.error(`[Auth-Service /login] ERROR CATASTRÓFICO durante el login para ${email}:`, error);
         res.status(500).json({ success: false, message: 'Error interno del servidor.' });
     }
 });
