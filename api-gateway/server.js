@@ -8,7 +8,6 @@ const app = express();
 
 // --- Middlewares estándar ---
 app.use(cors());
-app.use(express.json());
 
 // --- URLs de los microservicios (leídas desde .env) ---
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL || 'http://auth-service:3001';
