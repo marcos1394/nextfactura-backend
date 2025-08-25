@@ -95,13 +95,28 @@ const Restaurant = sequelize.define('Restaurant', {
     name: { type: DataTypes.STRING, allowNull: false },
     address: { type: DataTypes.STRING },
     logoUrl: { type: DataTypes.STRING },
-    subdomain: { type: DataTypes.STRING, unique: true }, // ⚠️ AÑADIDO CAMPO FALTANTE
-    subdomainUrl: { type: DataTypes.STRING }, // ⚠️ AÑADIDO CAMPO FALTANTE
+    subdomain: { type: DataTypes.STRING, unique: true },
+    subdomainUrl: { type: DataTypes.STRING },
+    // --- NUEVO: Clave única para la autenticación del agente ---
+    agentKey: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4, // Se genera una clave única automáticamente
+        allowNull: false,
+        unique: true
+    },
+    connectionMethod: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: 'direct', // Por defecto, los restaurantes usan conexión directa
+        validate: {
+            isIn: [['direct', 'agent']] // Solo permite estos dos valores
+        }
+    },
     connectionHost: { type: DataTypes.STRING },
     connectionPort: { type: DataTypes.STRING },
     connectionUser: { type: DataTypes.STRING },
     connectionPassword: { type: DataTypes.STRING },
-    connectionDbName: { type: DataTypes.STRING },
+    connectionDbName: { type: DataTypes.STRING },    
     vpnUsername: { type: DataTypes.STRING },
     vpnPassword: { type: DataTypes.STRING }
 }, {
@@ -656,6 +671,72 @@ app.get('/:id', authenticateToken, async (req, res) => {
         });
     }
 });
+
+// --- NUEVO ENDPOINT: Descarga Segura del Conector ---
+// Este endpoint es llamado por el FRONTEND de un usuario logueado.
+app.get('/connector/download', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // 1. VERIFICAR LA SUSCRIPCIÓN ACTIVA DEL USUARIO
+        // Asumiendo que tienes un modelo PlanPurchase
+        const activeSubscription = await PlanPurchase.findOne({
+            where: { userId: userId, status: 'active' }
+        });
+
+        if (!activeSubscription) {
+            return res.status(403).json({ 
+                success: false, 
+                message: 'Acceso denegado. Se requiere un plan activo para descargar el conector.' 
+            });
+        }
+
+        // 2. SERVIR EL ARCHIVO DE FORMA SEGURA
+        // La ruta donde moviste el instalador en el servidor.
+        const filePath = '/home/servidor/private_downloads/NextFactura Connector 1.0.0.msi'; 
+        
+        console.log(`[Service] Usuario ${userId} ha iniciado la descarga del conector.`);
+        
+        // El método res.download() de Express envía el archivo al navegador.
+        res.download(filePath);
+
+    } catch (error) {
+        console.error('[Service /connector/download] Error:', error);
+        res.status(500).json({ success: false, message: 'No se pudo procesar la descarga.' });
+    }
+});
+
+// --- NUEVO ENDPOINT: Validación Interna de Clave de Agente ---
+// Este endpoint es llamado SOLAMENTE por el connector-service.
+app.post('/internal/validate-agent-key', async (req, res) => {
+    const { agentKey } = req.body;
+
+    if (!agentKey) {
+        return res.status(400).json({ success: false, message: 'Falta agentKey.' });
+    }
+
+    try {
+        // Buscamos un restaurante que tenga esa clave de agente
+        const restaurant = await Restaurant.findOne({
+            where: { agentKey: agentKey },
+            attributes: ['id', 'name'] // Solo devolvemos los datos necesarios
+        });
+
+        if (restaurant) {
+            // La clave es válida, devolvemos el ID del restaurante
+            console.log(`[Service] Clave de agente validada para restaurante: ${restaurant.name}`);
+            res.status(200).json({ success: true, restaurantId: restaurant.id });
+        } else {
+            // La clave no corresponde a ningún restaurante
+            console.warn(`[Service] Intento de conexión con clave de agente inválida: ${agentKey}`);
+            res.status(404).json({ success: false, message: 'Clave de agente no encontrada.' });
+        }
+    } catch (error) {
+        console.error('[Service] Error validando clave de agente:', error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor.' });
+    }
+});
+
 
 // --- ENDPOINT: VERIFICAR DISPONIBILIDAD DE SUBDOMINIO ---
 app.get('/subdomain/check/:name', authenticateToken, async (req, res) => {
