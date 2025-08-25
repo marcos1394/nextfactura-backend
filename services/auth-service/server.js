@@ -76,6 +76,7 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
     }
 });
 
+
 // --- Modelo de Datos: User (Expandido para características profesionales) ---
 const User = sequelize.define('User', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
@@ -171,23 +172,39 @@ const PlanPurchase = sequelize.define('PlanPurchase', {
 });
 
 const Restaurant = sequelize.define('Restaurant', {
-    id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
     userId: { type: DataTypes.UUID, allowNull: false },
     name: { type: DataTypes.STRING, allowNull: false },
     address: { type: DataTypes.STRING },
     logoUrl: { type: DataTypes.STRING },
-    // ... el resto de tus campos de restaurants ...
+    subdomain: { type: DataTypes.STRING, unique: true },
+    subdomainUrl: { type: DataTypes.STRING },
+    // --- NUEVO: Clave única para la autenticación del agente ---
+    agentKey: {
+        type: DataTypes.UUID,
+        defaultValue: DataTypes.UUIDV4, // Se genera una clave única automáticamente
+        allowNull: false,
+        unique: true
+    },
+    connectionMethod: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: 'direct', // Por defecto, los restaurantes usan conexión directa
+        validate: {
+            isIn: [['direct', 'agent']] // Solo permite estos dos valores
+        }
+    },
     connectionHost: { type: DataTypes.STRING },
     connectionPort: { type: DataTypes.STRING },
     connectionUser: { type: DataTypes.STRING },
     connectionPassword: { type: DataTypes.STRING },
-    connectionDbName: { type: DataTypes.STRING },
+    connectionDbName: { type: DataTypes.STRING },    
     vpnUsername: { type: DataTypes.STRING },
-    vpnPassword: { type: DataTypes.STRING },
-    deletedAt: { type: DataTypes.DATE }
-}, { 
-    tableName: 'restaurants', 
-    timestamps: true 
+    vpnPassword: { type: DataTypes.STRING }
+}, {
+    tableName: 'restaurants',
+    timestamps: true,
+    paranoid: true
 });
 
 
@@ -269,8 +286,6 @@ const auditTrail = (action) => async (req, res, next) => {
 };
 
 // --- Rutas del Servicio de Autenticación ---
-
-
 
 app.post('/test-crash', (req, res) => {
     console.log('[SMOKE TEST] >>> Petición recibida en /test-crash');
@@ -555,6 +570,67 @@ app.post('/2fa/validate', async (req, res) => {
         res.status(500).json({ success: false, message: 'Error interno del servidor.' });
     }
 });
+
+// --- ENDPOINT FINAL: OBTENER TODOS LOS DATOS DE LA CUENTA ---
+app.get('/account-details', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        console.log(`[Auth-Service /account-details] Buscando datos completos para el usuario: ${userId}`);
+
+        // 1. Buscamos los datos principales en paralelo para mayor eficiencia
+        const [user, activeSubscription, restaurants] = await Promise.all([
+            User.findByPk(userId, {
+                attributes: { exclude: ['password', 'passwordResetToken', 'passwordResetExpires', 'twoFactorSecret', 'emailVerificationToken', 'magicLinkToken', 'magicLinkExpires'] }
+            }),
+            PlanPurchase.findOne({ where: { userId: userId, status: 'active' } }),
+            Restaurant.findAll({ 
+                where: { userId: userId },
+                attributes: ['id', 'name', 'status', 'agentKey'] 
+            })
+        ]);
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });
+        }
+
+        // 2. Buscamos los datos fiscales del primer restaurante (si existe)
+        let fiscalData = null;
+        if (restaurants && restaurants.length > 0) {
+            const primaryRestaurantId = restaurants[0].id;
+            fiscalData = await FiscalData.findOne({ where: { restaurantId: primaryRestaurantId } });
+        }
+
+        // 3. Construimos el objeto de respuesta final y completo
+        const accountData = {
+            profile: {
+                name: user.name,
+                email: user.email,
+                avatarUrl: user.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`,
+                memberSince: user.createdAt,
+            },
+            billing: {
+                rfc: fiscalData ? fiscalData.rfc : 'No disponible',
+                fiscalAddress: fiscalData ? fiscalData.fiscalAddress : 'No disponible',
+                paymentMethod: activeSubscription ? activeSubscription.paymentMethod : 'No disponible',
+                nextBillingDate: activeSubscription ? activeSubscription.nextBillingDate : 'No disponible',
+            },
+            plan: {
+                name: activeSubscription ? activeSubscription.planName : 'Sin Plan Activo',
+                price: activeSubscription ? activeSubscription.price : 0,
+                period: activeSubscription ? activeSubscription.period : 'N/A',
+                usagePercentage: activeSubscription ? activeSubscription.usagePercentage : 0, // Ejemplo
+            },
+            restaurants: restaurants || []
+        };
+
+        res.json({ success: true, data: accountData });
+
+    } catch (error) {
+        console.error('[Auth-Service /account-details] Error:', error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor al obtener los datos de la cuenta.' });
+    }
+});
+
 
 // --- Endpoint de Logout ---
 app.post('/logout', authenticateToken, async (req, res) => {
