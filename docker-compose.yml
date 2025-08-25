@@ -19,7 +19,6 @@ services:
     networks:
       - app-net
     healthcheck:
-      # Este comando verifica si la base de datos está lista para aceptar conexiones.
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
@@ -32,7 +31,6 @@ services:
     networks:
       - app-net
     healthcheck:
-      # Este comando verifica si Redis está respondiendo.
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
@@ -44,15 +42,15 @@ services:
     restart: on-failure
     env_file: [".env"]
     ports:
-      # El único servicio que expone un puerto al host de Ubuntu.
+      # El único servicio que expone un puerto HTTP/S al Nginx del host.
       - "4000:8080"
     depends_on:
-      # El gateway espera a que los demás servicios al menos hayan arrancado.
       - auth-service
       - restaurant-service
       - payment-service
       - pos-service
       - pac-service
+      - connector-service # Agregamos dependencia al nuevo servicio
     networks:
       - app-net
   
@@ -63,10 +61,8 @@ services:
     env_file: [".env"]
     depends_on:
       postgres:
-        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
       redis:
-        # <-- CAMBIO CLAVE: No arranca hasta que redis esté "saludable".
         condition: service_healthy
     networks:
       - app-net
@@ -77,7 +73,6 @@ services:
     env_file: [".env"]
     depends_on:
       postgres:
-        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
     networks:
       - app-net
@@ -88,7 +83,6 @@ services:
     env_file: [".env"]
     depends_on:
       postgres:
-        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
     networks:
       - app-net
@@ -99,9 +93,11 @@ services:
     env_file: [".env"]
     depends_on:
       postgres:
-        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
       restaurant-service:
+        condition: service_started
+      # --- CAMBIO CLAVE 2: El pos-service ahora espera al connector-service ---
+      connector-service:
         condition: service_started
     networks:
       - app-net
@@ -112,10 +108,23 @@ services:
     env_file: [".env"]
     depends_on:
       postgres:
-        # <-- CAMBIO CLAVE: No arranca hasta que postgres esté "saludable".
         condition: service_healthy
       restaurant-service:
         condition: service_started
+    networks:
+      - app-net
+      
+  # --- CAMBIO CLAVE 1: NUEVO SERVICIO CONECTOR ---
+  connector-service:
+    build: ./services/connector-service
+    restart: on-failure
+    env_file: [".env"]
+    ports:
+      # Puerto público para que los agentes instalados en los restaurantes se conecten.
+      - "4006:4006"
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - app-net
       
