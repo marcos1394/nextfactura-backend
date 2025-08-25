@@ -1,11 +1,11 @@
-// services/connector-service/server.js
+// services/connector-service/server.js (Versión Final y Completa)
 
 require('dotenv').config();
 const http = require('http');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const { v4: uuidv4 } = require('uuid');
-const { createClient } = require('redis'); // Para publicar respuestas
+const { createClient } = require('redis');
 
 // --- 1. CONFIGURACIÓN INICIAL ---
 const app = express();
@@ -13,18 +13,16 @@ app.use(express.json());
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Cliente de Redis para publicar mensajes en el canal de respuestas.
 const publisher = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
 publisher.on('error', (err) => console.error('[Connector-Service] Error en el cliente Redis Publisher:', err));
 publisher.connect();
 
-// Mapa para guardar las conexiones activas de los agentes.
 const clients = new Map();
 
 console.log('[Connector-Service] Servicio iniciando...');
 
 // --- 2. LÓGICA DE MANEJO DE CONEXIONES WEBSOCKET ---
-wss.on('connection', (ws, req) => {
+wss.on('connection', async (ws, req) => { // La función ahora es 'async'
     const agentKey = req.headers['x-agent-key'];
 
     if (!agentKey) {
@@ -33,49 +31,66 @@ wss.on('connection', (ws, req) => {
         return;
     }
 
-    // TODO: Validar 'agentKey' contra la base de datos para obtener el restaurantId real.
-    // Por ahora, el agentKey (que debería ser el restaurantId) será nuestro identificador.
-    const clientId = agentKey;
+    // --- VALIDACIÓN DE LA CLAVE DE AGENTE (Lógica implementada) ---
+    try {
+        const validationUrl = `${process.env.RESTAURANT_SERVICE_URL}/internal/validate-agent-key`;
+        const response = await fetch(validationUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agentKey })
+        });
 
-    ws.id = uuidv4(); // ID único para la sesión actual de la conexión
-    clients.set(clientId, ws);
+        const validationResult = await response.json();
 
-    console.log(`[Connector-Service] Agente conectado. Cliente ID: ${clientId}. Sesión: ${ws.id}. Clientes totales: ${clients.size}`);
-    ws.send(JSON.stringify({ type: 'welcome', message: 'Conexión establecida con NextFactura.' }));
-
-    // --- MANEJO DE MENSAJES DEL AGENTE ---
-    ws.on('message', (message) => {
-        try {
-            const parsedMessage = JSON.parse(message);
-            console.log(`[Connector-Service] Mensaje recibido del Cliente ID ${clientId}.`);
-
-            // Verificamos si este mensaje es una respuesta a una petición anterior
-            if (parsedMessage.correlationId) {
-                const responsePayload = JSON.stringify({
-                    correlationId: parsedMessage.correlationId,
-                    data: parsedMessage.data || null,
-                    error: parsedMessage.error || null,
-                });
-
-                // Publicamos la respuesta en el canal de Redis para que el pos-service la escuche.
-                publisher.publish('agent-responses', responsePayload);
-                console.log(`[Connector-Service] Respuesta para ${parsedMessage.correlationId} publicada en Redis.`);
-            }
-
-        } catch (error) {
-            console.error(`[Connector-Service] Error procesando mensaje del Cliente ID ${clientId}:`, error);
+        if (!response.ok || !validationResult.success) {
+            console.warn(`[Connector-Service] Conexión rechazada: Clave de agente inválida: ${agentKey}`);
+            ws.terminate();
+            return;
         }
-    });
+        
+        // Usamos el restaurantId como nuestro identificador único y seguro
+        const clientId = validationResult.restaurantId;
 
-    // --- MANEJO DE DESCONEXIÓN Y ERRORES ---
-    ws.on('close', () => {
-        clients.delete(clientId);
-        console.log(`[Connector-Service] Agente desconectado. Cliente ID: ${clientId}. Clientes totales: ${clients.size}`);
-    });
+        ws.id = uuidv4();
+        clients.set(clientId, ws);
 
-    ws.on('error', (error) => {
-        console.error(`[Connector-Service] Error en la conexión del Cliente ID ${clientId}:`, error);
-    });
+        console.log(`[Connector-Service] Agente conectado. Cliente ID: ${clientId}. Sesión: ${ws.id}. Clientes totales: ${clients.size}`);
+        ws.send(JSON.stringify({ type: 'welcome', message: 'Conexión establecida con NextFactura.' }));
+
+        // --- MANEJO DE MENSAJES DEL AGENTE ---
+        ws.on('message', (message) => {
+            try {
+                const parsedMessage = JSON.parse(message);
+                console.log(`[Connector-Service] Mensaje recibido del Cliente ID ${clientId}.`);
+
+                if (parsedMessage.correlationId) {
+                    const responsePayload = JSON.stringify({
+                        correlationId: parsedMessage.correlationId,
+                        data: parsedMessage.data || null,
+                        error: parsedMessage.error || null,
+                    });
+                    publisher.publish('agent-responses', responsePayload);
+                    console.log(`[Connector-Service] Respuesta para ${parsedMessage.correlationId} publicada en Redis.`);
+                }
+            } catch (error) {
+                console.error(`[Connector-Service] Error procesando mensaje del Cliente ID ${clientId}:`, error);
+            }
+        });
+
+        // --- MANEJO DE DESCONEXIÓN Y ERRORES ---
+        ws.on('close', () => {
+            clients.delete(clientId);
+            console.log(`[Connector-Service] Agente desconectado. Cliente ID: ${clientId}. Clientes totales: ${clients.size}`);
+        });
+
+        ws.on('error', (error) => {
+            console.error(`[Connector-Service] Error en la conexión del Cliente ID ${clientId}:`, error);
+        });
+
+    } catch (error) {
+        console.error('[Connector-Service] Error durante la validación del agente:', error);
+        ws.terminate();
+    }
 });
 
 // --- 3. API INTERNA PARA QUE OTROS SERVICIOS USEN EL CONECTOR ---
@@ -90,6 +105,8 @@ app.post('/internal/send-command', (req, res) => {
     const targetClient = clients.get(clientId);
 
     if (targetClient && targetClient.readyState === 1) { // 1 === WebSocket.OPEN
+        // Guardamos el correlationId en la conexión para saber a quién responder después.
+        targetClient.correlationId = correlationId;
         const message = JSON.stringify({ command, correlationId, data });
         targetClient.send(message);
         console.log(`[Connector-Service] Comando '${command}' enviado exitosamente al Cliente ID ${clientId}.`);
@@ -100,6 +117,7 @@ app.post('/internal/send-command', (req, res) => {
     }
 });
 
+// Endpoint de salud
 app.get('/health', (req, res) => {
     res.status(200).json({
         status: 'ok',
