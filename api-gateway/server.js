@@ -1,4 +1,4 @@
-// api-gateway/server.js (Versión Profesional y Completa con Logs Detallados)
+// api-gateway/server.js (Versión Profesional y Completa con Logs y WebSockets)
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -15,6 +15,7 @@ const RESTAURANT_SERVICE_URL = process.env.RESTAURANT_SERVICE_URL || 'http://res
 const PAYMENT_SERVICE_URL = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:4003';
 const PAC_SERVICE_URL = process.env.PAC_SERVICE_URL || 'http://pac-service:4005';
 const POS_SERVICE_URL = process.env.POS_SERVICE_URL || 'http://pos-service:4004';
+const CONNECTOR_SERVICE_URL = process.env.CONNECTOR_SERVICE_URL || 'http://connector-service:4006'; // <-- NUEVA VARIABLE
 
 console.log('API Gateway (vProfesional) iniciando...');
 
@@ -31,31 +32,20 @@ app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 const createProxyOptions = (targetUrl, routePrefix) => ({
     target: targetUrl,
     changeOrigin: true,
-
-    // --- CORRECCIÓN FINAL ---
-    // Se añade un timeout de 60 segundos (60000 ms). El nombre correcto de 
-    // la opción es 'timeout'. Esto evita que el proxy aborte peticiones largas.
+    ws: true, // <-- CAMBIO CLAVE: Habilita el proxy para WebSockets
     timeout: 60000,
-
     pathRewrite: {
-        // Reescribe la ruta, ej: /auth/login -> /login
         [`^${routePrefix}`]: '',
     },
-    logLevel: 'debug', // Nivel de log del proxy
+    logLevel: 'debug',
     on: {
-        // Evento: Ocurre un error al conectar con el microservicio
         error: (err, req, res) => {
             console.error(`[Proxy ERROR] Petición ${req.method} ${req.originalUrl} a ${targetUrl}`);
             console.error(`[Proxy ERROR] Causa: ${err.message}`);
-            // http-proxy-middleware ya envía una respuesta 500, aquí solo registramos el error.
         },
-
-        // Evento: Se envía la petición al microservicio
         proxyReq: (proxyReq, req, res) => {
             console.log(`[Proxy -> Service] Redirigiendo ${req.method} ${req.originalUrl} hacia ${targetUrl}${proxyReq.path}`);
         },
-
-        // Evento: Se recibe la respuesta del microservicio
         proxyRes: (proxyRes, req, res) => {
             console.log(`[Service -> Gateway] Respuesta de ${targetUrl}${req.originalUrl} | STATUS: ${proxyRes.statusCode}`);
         },
@@ -69,6 +59,7 @@ const services = [
     { route: '/payments', target: PAYMENT_SERVICE_URL },
     { route: '/pac', target: PAC_SERVICE_URL },
     { route: '/pos', target: POS_SERVICE_URL },
+    { route: '/connector', target: CONNECTOR_SERVICE_URL }, // <-- NUEVA RUTA PARA EL CONECTOR
 ];
 
 services.forEach(({ route, target }) => {
