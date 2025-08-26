@@ -191,68 +191,34 @@ Restaurant.belongsTo(User, { foreignKey: 'userId' });
 Restaurant.hasOne(FiscalData, { foreignKey: 'restaurantId' });
 FiscalData.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
 
-// --- MIDDLEWARE DE AUTENTICACIÓN MEJORADO ---
-const authenticateToken = async (req, res, next) => {
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ success: false, message: 'Token no proporcionado o con formato incorrecto.' });
+    }
+
+    const token = authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'Token ausente después de "Bearer".' });
+    }
+
     try {
-        const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1];
-        
-        if (!token) {
-            return res.status(401).json({ 
-                success: false, 
-                message: 'Acceso denegado. Token no proporcionado.' 
-            });
-        }
-
-        // Verificar token JWT
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, { ignoreExpiration: false });
-
-        // Verificar lista negra de Redis si está disponible
-        if (redisClient.isOpen) {
-            try {
-                const isBlacklisted = await redisClient.get(`blacklist:${decoded.jti}`);
-                if (isBlacklisted) {
-                    return res.status(401).json({ 
-                        success: false, 
-                        message: 'Token revocado. Por favor, inicia sesión de nuevo.' 
-                    });
-                }
-            } catch (redisError) {
-                console.error('[Auth] Error checking Redis blacklist:', redisError);
-                // Continuar sin verificación de Redis
-            }
-        }
-
-        // Verificar que el usuario existe
-        const user = await User.findByPk(decoded.id);
-        if (!user) {
-            return res.status(401).json({ 
-                success: false, 
-                message: 'Usuario no encontrado.' 
-            });
-        }
-
-        req.user = decoded;
+        // Simplemente verificamos el token y extraemos los datos del usuario.
+        // No necesitamos volver a consultar la base de datos aquí.
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = decoded; // Adjuntamos los datos del usuario (id, email, role) a la petición
         next();
     } catch (err) {
-        console.error('[Auth] Token verification error:', err);
+        console.error(`[Service Auth] Error de verificación de token: ${err.name}`);
         
         if (err.name === 'TokenExpiredError') {
-            return res.status(401).json({ 
-                success: false, 
-                message: 'Token expirado. Por favor, inicia sesión de nuevo.' 
-            });
-        } else if (err.name === 'JsonWebTokenError') {
-            return res.status(401).json({ 
-                success: false, 
-                message: 'Token inválido.' 
-            });
+            return res.status(401).json({ success: false, message: 'Token expirado.' });
         }
         
-        return res.status(403).json({ 
-            success: false, 
-            message: 'Token inválido o expirado.' 
-        });
+        // Cubre 'jwt malformed', 'invalid signature', etc.
+        return res.status(403).json({ success: false, message: 'Token inválido.' });
     }
 };
 
