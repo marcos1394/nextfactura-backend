@@ -659,8 +659,7 @@ app.get('/connector/download', authenticateToken, async (req, res) => {
 
         // 2. SERVIR EL ARCHIVO DE FORMA SEGURA
         // La ruta donde moviste el instalador en el servidor.
-        const filePath = '/home/servidor/private_downloads/NextFactura Connector 1.0.0.msi'; 
-        
+        const filePath = '/downloads/NextFactura Connector 1.0.0.msi';        
         console.log(`[Service] Usuario ${userId} ha iniciado la descarga del conector.`);
         
         // El método res.download() de Express envía el archivo al navegador.
