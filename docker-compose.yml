@@ -76,6 +76,10 @@ services:
         condition: service_healthy
     networks:
       - app-net
+    volumes:
+      # Mapea la carpeta del host (izquierda) a una carpeta dentro del contenedor (derecha)
+      # ':ro' significa "read-only" (solo lectura), que es más seguro.
+      - /home/servidor/private_downloads:/downloads:ro
 
   payment-service:
     build: ./services/payment-service
