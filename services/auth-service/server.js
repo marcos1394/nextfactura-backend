@@ -186,6 +186,12 @@ const Restaurant = sequelize.define('Restaurant', {
         allowNull: false,
         unique: true
     },
+    // --- AÑADE ESTE CAMPO ---
+    status: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        defaultValue: 'Activo' // Un buen valor por defecto
+    },
     connectionMethod: {
         type: DataTypes.STRING,
         allowNull: false,
@@ -208,6 +214,26 @@ const Restaurant = sequelize.define('Restaurant', {
 });
 
 
+const FiscalData = sequelize.define('FiscalData', {
+    id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
+    restaurantId: { type: DataTypes.UUID, allowNull: false },
+    rfc: { type: DataTypes.STRING },
+    businessName: { type: DataTypes.STRING },
+    fiscalRegime: { type: DataTypes.STRING },
+    csdCertificateUrl: { type: DataTypes.STRING },
+     // --- CAMPO AÑADIDO ---
+    fiscalAddress: { 
+        type: DataTypes.STRING,
+        allowNull: false // Se establece como no nulo para coincidir con la BD
+    },
+    csdKeyUrl: { type: DataTypes.STRING },
+    csdPassword: { type: DataTypes.STRING }
+}, {
+    tableName: 'fiscal_data',
+    timestamps: true
+});
+
+
 
 // --- Definición de Relaciones ---
 User.belongsToMany(Role, { through: 'UserRoles' });
@@ -215,6 +241,7 @@ Role.belongsToMany(User, { through: 'UserRoles' });
 
 Role.belongsToMany(Permission, { through: 'RolePermissions' });
 Permission.belongsToMany(Role, { through: 'RolePermissions' });
+FiscalData.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
 
 // --- INICIO: RELACIONES NUEVAS ---
 // Un usuario puede tener muchas compras de planes.
