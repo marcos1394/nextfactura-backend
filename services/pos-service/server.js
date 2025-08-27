@@ -80,7 +80,7 @@ const dataQueryHandler = (query, queryType) => async (req, res) => {
     try {
         // 1. Obtener datos de conexión y método desde el restaurant-service
         const restaurantServiceUrl = process.env.RESTAURANT_SERVICE_URL || 'http://restaurant-service:4002';
-        const resp = await fetch(`${restaurantServiceUrl}/restaurants/${restaurantId}`, {
+        const resp = await fetch(`${restaurantServiceUrl}/${restaurantId}`, {
             headers: { 'Authorization': req.headers.authorization }
         });
         const restaurantData = await resp.json();
