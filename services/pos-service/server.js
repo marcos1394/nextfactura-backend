@@ -174,7 +174,8 @@ app.post('/test-connection', authenticateToken, async (req, res) => {
 // --- Definición de rutas de consulta y las consultas SQL correspondientes ---
 // Cada ruta ahora pasa su consulta y un 'queryType' único al handler.
 app.get('/query/:restaurantId/products', authenticateToken, dataQueryHandler(
-    'SELECT [id], [Code], [Name], [StartDate], [EndDate], [HasTransferredTax], [HasTransferredIEPS], [Complement] FROM [dbo].[Productos] ORDER BY [id] ASC', 
+    // Usamos los nombres de columna reales que encontraste en la base de datos
+    'SELECT [idproducto], [descripcion], [nombrecorto], [plu] FROM [dbo].[Productos] ORDER BY [descripcion] ASC', 
     'products'
 ));
 
