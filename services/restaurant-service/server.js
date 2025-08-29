@@ -144,15 +144,30 @@ const FiscalData = sequelize.define('FiscalData', {
     timestamps: true
 });
 
-// --- NUEVO MODELO ---
 const PortalConfig = sequelize.define('PortalConfig', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
     restaurantId: { type: DataTypes.UUID, allowNull: false, unique: true },
-    primaryColor: { type: DataTypes.STRING, defaultValue: '#005DAB' },
-    logoUrl: { type: DataTypes.STRING },
-    backgroundImageUrl: { type: DataTypes.STRING },
-    welcomeMessage: { type: DataTypes.STRING, defaultValue: 'Bienvenido a nuestro portal de facturación' },
-    customCSS: { type: DataTypes.TEXT }
+    
+    // --- CAMPOS CORREGIDOS Y AÑADIDOS ---
+    portalName: {
+        type: DataTypes.STRING,
+        allowNull: false
+    },
+    // Usamos 'field' para mapear el nombre del código (logoUrl) al nombre de la columna (portalLogoUrl)
+    logoUrl: {
+        type: DataTypes.STRING,
+        field: 'portalLogoUrl' 
+    },
+    customDomain: {
+        type: DataTypes.STRING,
+        unique: true
+    },
+    primaryColor: {
+        type: DataTypes.STRING
+    },
+    secondaryColor: {
+        type: DataTypes.STRING
+    }
 }, {
     tableName: 'portal_configs',
     timestamps: true
@@ -736,9 +751,11 @@ app.get('/portal-branding/:subdomain', async (req, res) => {
             // Usamos 'include' para traer los datos de la tabla relacionada 'portal_configs'
             include: [{
                 model: PortalConfig,
-                attributes: ['logoUrl', 'primaryColor'] // Solo traemos los campos que necesitamos
+                // Pedimos los campos que ahora existen en nuestro modelo PortalConfig
+                attributes: ['portalName', 'logoUrl', 'primaryColor'] 
             }],
-            attributes: ['id', 'name'] // De la tabla 'restaurants' solo necesitamos estos
+            // De la tabla 'restaurants' solo necesitamos el ID
+            attributes: ['id'] 
         });
 
         if (!restaurant || !restaurant.PortalConfig) {
@@ -748,8 +765,8 @@ app.get('/portal-branding/:subdomain', async (req, res) => {
         // Los datos ahora vienen anidados en el objeto PortalConfig
         const brandingData = {
             restaurantId: restaurant.id,
-            name: restaurant.name,
-            logoUrl: restaurant.PortalConfig.logoUrl,
+            name: restaurant.PortalConfig.portalName, // Usamos el nombre del portal
+            logoUrl: restaurant.PortalConfig.logoUrl, // Sequelize maneja el mapeo de 'portalLogoUrl'
             primaryColor: restaurant.PortalConfig.primaryColor || '#005DAB'
         };
         
