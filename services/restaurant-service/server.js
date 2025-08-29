@@ -706,23 +706,32 @@ app.post('/internal/validate-agent-key', async (req, res) => {
 
 // 1. OBTENER DATOS DE BRANDING POR SUBDOMINIO
 // =======================================================
+// EN services/restaurant-service/server.js
+
 app.get('/portal-branding/:subdomain', async (req, res) => {
     try {
         const { subdomain } = req.params;
+
         const restaurant = await Restaurant.findOne({
-            where: { subdomain },
-            attributes: ['id', 'name', 'logoUrl', 'primaryColor']
+            where: { subdomain: subdomain },
+            // Usamos 'include' para traer los datos de la tabla relacionada 'portal_configs'
+            include: [{
+                model: PortalConfig,
+                attributes: ['logoUrl', 'primaryColor'] // Solo traemos los campos que necesitamos
+            }],
+            attributes: ['id', 'name'] // De la tabla 'restaurants' solo necesitamos estos
         });
 
-        if (!restaurant) {
-            return res.status(404).json({ success: false, message: 'Restaurante no encontrado.' });
+        if (!restaurant || !restaurant.PortalConfig) {
+            return res.status(404).json({ success: false, message: 'Restaurante o configuración de portal no encontrados.' });
         }
 
+        // Los datos ahora vienen anidados en el objeto PortalConfig
         const brandingData = {
             restaurantId: restaurant.id,
             name: restaurant.name,
-            logoUrl: restaurant.logoUrl,
-            primaryColor: restaurant.primaryColor || '#005DAB'
+            logoUrl: restaurant.PortalConfig.logoUrl,
+            primaryColor: restaurant.PortalConfig.primaryColor || '#005DAB'
         };
         
         res.status(200).json({ success: true, branding: brandingData });
