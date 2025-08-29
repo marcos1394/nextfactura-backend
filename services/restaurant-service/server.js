@@ -702,33 +702,218 @@ app.post('/internal/validate-agent-key', async (req, res) => {
     }
 });
 
+// --- ENDPOINTS PÚBLICOS PARA EL PORTAL DE AUTOFACTURACIÓN ---
 
-// --- ENDPOINT: VERIFICAR DISPONIBILIDAD DE SUBDOMINIO ---
-app.get('/subdomain/check/:name', authenticateToken, async (req, res) => {
-    const { name } = req.params;
-    
+// 1. OBTENER DATOS DE BRANDING POR SUBDOMINIO
+// =======================================================
+app.get('/portal-branding/:subdomain', async (req, res) => {
     try {
-        const normalizedName = generateSubdomainName(name, 'temp');
-        
-        const existingRestaurant = await Restaurant.findOne({
-            where: { subdomain: normalizedName }
+        const { subdomain } = req.params;
+        const restaurant = await Restaurant.findOne({
+            where: { subdomain },
+            attributes: ['id', 'name', 'logoUrl', 'primaryColor']
         });
+
+        if (!restaurant) {
+            return res.status(404).json({ success: false, message: 'Restaurante no encontrado.' });
+        }
+
+        const brandingData = {
+            restaurantId: restaurant.id,
+            name: restaurant.name,
+            logoUrl: restaurant.logoUrl,
+            primaryColor: restaurant.primaryColor || '#005DAB'
+        };
         
-        const isAvailable = !existingRestaurant;
+        res.status(200).json({ success: true, branding: brandingData });
+
+    } catch (error) {
+        console.error(`[Service /portal-branding] Error:`, error);
+        res.status(500).json({ success: false, message: 'Error al obtener la información del portal.' });
+    }
+});
+
+
+// 2. BUSCAR UN TICKET PARA FACTURAR
+// =======================================================
+app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
+    const { restaurantId } = req.params;
+    const { ticketNumber } = req.body;
+
+    if (!ticketNumber) {
+        return res.status(400).json({ success: false, message: 'El número de ticket es requerido.' });
+    }
+
+    try {
+        const restaurant = await Restaurant.findByPk(restaurantId);
+        if (!restaurant) {
+            return res.status(404).json({ success: false, message: 'Restaurante no configurado.' });
+        }
         
+        const query = `SELECT TOP 1 total, fecha FROM cheques WHERE numcheque = '${ticketNumber.replace(/'/g, "''")}' AND pagado = 1`;
+        let ticketData;
+
+        if (restaurant.connectionMethod === 'agent') {
+            const correlationId = uuidv4();
+            const commandPromise = new Promise((resolve, reject) => {
+                pendingRequests.set(correlationId, { resolve, reject });
+                setTimeout(() => {
+                    if (pendingRequests.has(correlationId)) {
+                        pendingRequests.delete(correlationId);
+                        reject(new Error('Timeout: El agente del restaurante no respondió a tiempo.'));
+                    }
+                }, 30000); // Timeout de 30 segundos
+            });
+
+            await fetch(`http://connector-service:4006/internal/send-command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    clientId: restaurantId,
+                    command: 'search_ticket',
+                    correlationId: correlationId,
+                    data: { sql: query }
+                })
+            });
+
+            const agentResponse = await commandPromise;
+            ticketData = agentResponse[0]; // El agente devuelve un array, tomamos el primer resultado
+        } else {
+            const pool = await getConnectedPool({
+                user: restaurant.connectionUser, password: restaurant.connectionPassword,
+                server: restaurant.connectionHost, database: restaurant.connectionDbName,
+                port: restaurant.connectionPort,
+            });
+            const result = await pool.request().query(query);
+            ticketData = result.recordset[0];
+            await pool.close();
+        }
+
+        if (!ticketData) {
+            return res.status(404).json({ success: false, message: 'Ticket no encontrado, ya facturado o inválido.' });
+        }
+
         res.status(200).json({
             success: true,
-            subdomain: normalizedName,
-            available: isAvailable,
-            url: isAvailable ? `https://${normalizedName}.${process.env.ROOT_DOMAIN || 'nextfactura.com.mx'}` : null
+            ticket: { id: ticketNumber, amount: ticketData.total, date: ticketData.fecha }
         });
-        
+
     } catch (error) {
-        console.error('[Restaurant-Service GET /subdomain/check] Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error al verificar disponibilidad del subdominio.'
+        console.error(`[Service /search-ticket] Error:`, error);
+        res.status(500).json({ success: false, message: error.message || 'Error al buscar el ticket.' });
+    }
+});
+
+
+// 3. GENERAR LA FACTURA FINAL
+// En services/restaurant-service/server.js
+
+// 3. GENERAR LA FACTURA FINAL
+// =======================================================
+app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
+    const { restaurantId } = req.params;
+    const { ticket, fiscalData: clientFiscalData } = req.body; // Renombramos para claridad
+
+    if (!ticket || !clientFiscalData) {
+        return res.status(400).json({ success: false, message: 'Faltan datos del ticket o fiscales.' });
+    }
+
+    try {
+        console.log(`[Service] Iniciando proceso de facturación para el ticket ${ticket.id}`);
+
+        // --- 1. Obtener datos completos del Restaurante y detalles del Ticket ---
+        const restaurant = await Restaurant.findByPk(restaurantId, { include: [FiscalData] });
+        if (!restaurant || !restaurant.FiscalDatum) {
+            return res.status(404).json({ success: false, message: 'Datos fiscales del restaurante no encontrados.' });
+        }
+        
+        // La consulta para obtener los artículos específicos de ese ticket
+        const detailsQuery = `SELECT * FROM cheqdet WHERE numcheque = '${ticket.id.replace(/'/g, "''")}'`;
+        let ticketDetails;
+
+        if (restaurant.connectionMethod === 'agent') {
+            const correlationId = uuidv4();
+            const commandPromise = new Promise((resolve, reject) => {
+                pendingRequests.set(correlationId, { resolve, reject });
+                setTimeout(() => {
+                    if (pendingRequests.has(correlationId)) {
+                        pendingRequests.delete(correlationId);
+                        reject(new Error('Timeout: El agente no respondió para obtener los detalles del ticket.'));
+                    }
+                }, 30000);
+            });
+
+            await fetch(`http://connector-service:4006/internal/send-command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    clientId: restaurantId,
+                    command: 'get_ticket_details',
+                    correlationId: correlationId,
+                    data: { sql: detailsQuery }
+                })
+            });
+            ticketDetails = await commandPromise;
+        } else {
+            const pool = await getConnectedPool({ /* ... credenciales ... */ });
+            const result = await pool.request().query(detailsQuery);
+            ticketDetails = result.recordset;
+            await pool.close();
+        }
+
+        if (!ticketDetails || ticketDetails.length === 0) {
+            return res.status(404).json({ success: false, message: 'No se encontraron los productos del ticket.' });
+        }
+
+        // --- 2. Llamar al 'pac-service' para timbrar la factura ---
+        console.log(`[Service] Enviando datos al pac-service para timbrado.`);
+        const pacServiceUrl = process.env.PAC_SERVICE_URL || 'http://pac-service:4005';
+        
+        const pacResponse = await fetch(`${pacServiceUrl}/stamp`, {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ 
+               ticket: ticket,
+               ticketDetails: ticketDetails, 
+               clientFiscalData: clientFiscalData, 
+               restaurantFiscalData: restaurant.FiscalDatum 
+            })
         });
+
+        const invoiceResult = await pacResponse.json();
+
+        if (!pacResponse.ok || !invoiceResult.success) {
+            throw new Error(invoiceResult.message || 'El servicio de timbrado no pudo generar la factura.');
+        }
+
+        // --- 3. Guardar un registro de la factura en tu base de datos ---
+        // (Asumiendo que tienes un modelo 'Invoice')
+        // await Invoice.create({
+        //     restaurantId: restaurantId,
+        //     uuid: invoiceResult.uuid, // El UUID que devuelve el PAC
+        //     ticketId: ticket.id,
+        //     clientRfc: clientFiscalData.rfc,
+        //     total: ticket.amount,
+        //     // ... otros campos como xmlUrl, pdfUrl, etc.
+        // });
+        console.log(`[Service] Factura con UUID ${invoiceResult.uuid} guardada en la base de datos.`);
+
+
+        // --- 4. Enviar la factura por correo (usando un servicio de email) ---
+        // Aquí llamarías a una función o servicio que se encargue de los correos.
+        // await emailService.sendInvoice(clientFiscalData.email, invoiceResult.pdfUrl, invoiceResult.xmlUrl);
+        console.log(`[Service] Notificación de factura enviada a ${clientFiscalData.email}.`);
+        
+        // --- RESPUESTA FINAL ---
+        res.status(200).json({
+            success: true,
+            message: `Factura generada y enviada a ${clientFiscalData.email}.`,
+            invoiceId: invoiceResult.uuid // Devolvemos el ID de la factura
+        });
+
+    } catch (error) {
+        console.error(`[Service /generate-invoice] Error:`, error);
+        res.status(500).json({ success: false, message: error.message || 'Error al generar la factura.' });
     }
 });
 

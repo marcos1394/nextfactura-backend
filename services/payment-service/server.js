@@ -112,6 +112,14 @@ const Plan = sequelize.define('Plan', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
     name: { type: DataTypes.STRING, allowNull: false, unique: true },
     price: { type: DataTypes.FLOAT, allowNull: false },
+    
+    // --- CAMPO AÑADIDO ---
+    timbres: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0 // Ej. Plan Básico: 100, Plan Pro: 500
+    },
+
     features: { type: DataTypes.JSONB, allowNull: true },
     mercadopagoId: { type: DataTypes.STRING, allowNull: true },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
@@ -128,7 +136,19 @@ const PlanPurchase = sequelize.define('PlanPurchase', {
     expirationDate: { type: DataTypes.DATE },
     paymentId: { type: DataTypes.STRING, allowNull: true, unique: true },
     paymentProvider: { type: DataTypes.STRING, defaultValue: 'mercadopago' },
-    preferenceId: { type: DataTypes.STRING, allowNull: true }
+    preferenceId: { type: DataTypes.STRING, allowNull: true },
+
+    // --- CAMPOS AÑADIDOS ---
+    timbres_allocated: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0
+    },
+    timbres_used: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0
+    }
 }, { tableName: 'plan_purchases', timestamps: true });
 
 
@@ -261,49 +281,79 @@ const purchase = await PlanPurchase.create({
     }
 });
 
-// POST /webhook/mercadopago - Endpoint público para recibir notificaciones de Mercado Pago
+// En services/payment-service/server.js
+
 app.post('/webhook/mercadopago', async (req, res) => {
     const { type, data } = req.body;
 
+    // Solo nos interesan las notificaciones de tipo 'payment'
     if (type === 'payment') {
         try {
+            // 1. Obtenemos los detalles completos del pago desde la API de Mercado Pago
             const paymentDetails = await payment.get({ id: data.id });
             const purchaseId = parseInt(paymentDetails.external_reference, 10);
             
             const purchase = await PlanPurchase.findByPk(purchaseId);
             if (!purchase) {
                 console.warn(`[Webhook] Compra con ID ${purchaseId} no encontrada.`);
+                // Devolvemos 200 para que Mercado Pago no siga reintentando
                 return res.sendStatus(200);
             }
 
+            // 2. Verificamos si el pago fue aprobado y si la compra aún no está activa
             if (paymentDetails.status === 'approved' && purchase.status !== 'active') {
+                
+                // --- LÓGICA DE ASIGNACIÓN DE TIMBRES ---
+                // Buscamos el plan asociado a esta compra para saber cuántos timbres dar
+                const planDetails = await Plan.findByPk(purchase.planId);
+                if (!planDetails) {
+                    console.error(`[Webhook] No se encontró el plan con ID ${purchase.planId} para la compra ${purchase.id}.`);
+                    // Devolvemos 500 para indicar un error de configuración interna
+                    return res.sendStatus(500);
+                }
+                
+                const timbresToAllocate = planDetails.timbres;
+                console.log(`[Webhook] Plan "${planDetails.name}" activado. Asignando ${timbresToAllocate} timbres.`);
+                // --- FIN DE LA LÓGICA DE TIMBRES ---
+
+                // 3. Actualizamos el registro de la compra en nuestra base de datos
                 purchase.status = 'active';
                 purchase.paymentId = paymentDetails.id.toString();
                 purchase.purchaseDate = new Date();
-                // Asumimos planes de 1 año para este ejemplo
+                
+                // Asignamos los timbres que le corresponden a esta compra
+                purchase.timbres_allocated = timbresToAllocate; 
+                
+                // Calculamos la fecha de expiración (ej. un año)
                 const expiration = new Date();
                 expiration.setFullYear(expiration.getFullYear() + 1);
                 purchase.expirationDate = expiration;
+                
                 await purchase.save();
+                
                 console.log(`[Webhook] Compra ${purchase.id} para usuario ${purchase.userId} activada exitosamente.`);
-                // --- NUEVO: Enviar correo de confirmación ---
-                const planDetails = await Plan.findByPk(purchase.planId);
+
+                // 4. (Opcional) Enviar correo de confirmación al cliente
                 const userEmail = paymentDetails.payer.email;
-                if (userEmail && planDetails) {
+                if (userEmail) {
                     const emailHtml = `<h1>¡Gracias por tu compra!</h1>
                                      <p>Tu plan <strong>${planDetails.name}</strong> ha sido activado.</p>
+                                     <p>Se han añadido <strong>${timbresToAllocate} timbres</strong> a tu cuenta.</p>
                                      <p>Estará vigente hasta el: ${purchase.expirationDate.toLocaleDateString('es-MX')}.</p>`;
                     sendEmail(userEmail, 'Confirmación de tu plan en NextManager', emailHtml);
                 }
             } else {
-                console.log(`[Webhook] Estado de pago no aprobado (${paymentDetails.status}) para compra ${purchase.id}.`);
+                console.log(`[Webhook] Estado de pago no relevante (${paymentDetails.status}) para la compra ${purchase.id}.`);
             }
         } catch (error) {
             console.error('[Webhook] Error procesando notificación:', error);
-            return res.sendStatus(500); // Devuelve error para que MP reintente
+            // Devolvemos error 500 para que Mercado Pago reintente enviar la notificación
+            return res.sendStatus(500);
         }
     }
-    res.sendStatus(200); // Responde a MP que la notificación fue recibida
+    
+    // Respondemos a Mercado Pago que la notificación fue recibida correctamente
+    res.sendStatus(200);
 });
 
 // GET /status - Ruta protegida para que un usuario vea su plan actual
