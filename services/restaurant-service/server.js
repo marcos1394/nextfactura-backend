@@ -144,6 +144,20 @@ const FiscalData = sequelize.define('FiscalData', {
     timestamps: true
 });
 
+// --- NUEVO MODELO ---
+const PortalConfig = sequelize.define('PortalConfig', {
+    id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
+    restaurantId: { type: DataTypes.UUID, allowNull: false, unique: true },
+    primaryColor: { type: DataTypes.STRING, defaultValue: '#005DAB' },
+    logoUrl: { type: DataTypes.STRING },
+    backgroundImageUrl: { type: DataTypes.STRING },
+    welcomeMessage: { type: DataTypes.STRING, defaultValue: 'Bienvenido a nuestro portal de facturación' },
+    customCSS: { type: DataTypes.TEXT }
+}, {
+    tableName: 'portal_configs',
+    timestamps: true
+});
+
 const Role = sequelize.define('Role', {
     name: { type: DataTypes.STRING, allowNull: false, unique: true }
 }, { timestamps: false });
@@ -190,6 +204,11 @@ User.hasMany(Restaurant, { foreignKey: 'userId' });
 Restaurant.belongsTo(User, { foreignKey: 'userId' });
 Restaurant.hasOne(FiscalData, { foreignKey: 'restaurantId' });
 FiscalData.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
+// --- RELACIONES ---
+//...
+Restaurant.hasOne(PortalConfig, { foreignKey: 'restaurantId', onDelete: 'CASCADE' });
+PortalConfig.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
+//...
 
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
