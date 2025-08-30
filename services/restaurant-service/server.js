@@ -284,15 +284,21 @@ const authenticateToken = (req, res, next) => {
     }
 };
 
-async function getFileAsBase64(filePath) {
+// --- FUNCIÓN AUXILIAR CORREGIDA ---
+async function getFileAsBase64(fileUrl) {
     try {
-        // La ruta base dentro del contenedor donde están los archivos
+        // EXTRAEMOS SOLO EL NOMBRE DEL ARCHIVO DE LA URL
+        const filename = path.basename(fileUrl);
+        // DEFINIMOS LA RUTA LOCAL DENTRO DEL CONTENEDOR
         const basePath = '/downloads/'; 
-        const fullPath = path.join(basePath, path.basename(filePath));
+        const fullPath = path.join(basePath, filename);
+        
+        console.log(`[Service] Leyendo archivo local desde: ${fullPath}`);
         const fileBuffer = await fs.readFile(fullPath);
         return fileBuffer.toString('base64');
     } catch (error) {
-        throw new Error(`No se pudo leer el archivo local: ${filePath}`);
+        console.error(`[Service] Error al leer el archivo local: ${fileUrl}`, error);
+        throw new Error(`No se pudo leer el archivo: ${path.basename(fileUrl)}`);
     }
 }
 
