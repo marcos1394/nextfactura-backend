@@ -287,15 +287,25 @@ const authenticateToken = (req, res, next) => {
 // --- FUNCIÓN AUXILIAR CORREGIDA ---
 async function getFileAsBase64(fileUrl) {
     try {
-        // EXTRAEMOS SOLO EL NOMBRE DEL ARCHIVO DE LA URL
+        // 1. Extraemos solo el nombre del archivo de la URL
         const filename = path.basename(fileUrl);
-        // DEFINIMOS LA RUTA LOCAL DENTRO DEL CONTENEDOR
-        const basePath = '/downloads/'; 
-        const fullPath = path.join(basePath, filename);
-        
-        console.log(`[Service] Leyendo archivo local desde: ${fullPath}`);
+
+        // 2. Determinamos la subcarpeta basándonos en la URL original
+        let subfolder = '';
+        if (fileUrl.includes('/private/')) {
+            subfolder = 'private';
+        } else if (fileUrl.includes('/public/')) {
+            subfolder = 'public';
+        }
+
+        // 3. Construimos la ruta completa DENTRO del contenedor
+        const basePath = '/downloads/';
+        const fullPath = path.join(basePath, subfolder, filename);
+
+        console.log(`[Service] Leyendo archivo local desde ruta completa: ${fullPath}`);
         const fileBuffer = await fs.readFile(fullPath);
         return fileBuffer.toString('base64');
+
     } catch (error) {
         console.error(`[Service] Error al leer el archivo local: ${fileUrl}`, error);
         throw new Error(`No se pudo leer el archivo: ${path.basename(fileUrl)}`);
