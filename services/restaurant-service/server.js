@@ -287,21 +287,19 @@ const authenticateToken = (req, res, next) => {
 // --- FUNCIÓN AUXILIAR CORREGIDA ---
 async function getFileAsBase64(fileUrl) {
     try {
-        // 1. Extraemos solo el nombre del archivo de la URL
         const filename = path.basename(fileUrl);
-
-        // 2. Determinamos la subcarpeta basándonos en la URL original
         let subfolder = '';
+
+        // Determinamos si el archivo es público o privado basándonos en la URL
         if (fileUrl.includes('/private/')) {
             subfolder = 'private';
         } else if (fileUrl.includes('/public/')) {
             subfolder = 'public';
         }
 
-        // 3. Construimos la ruta completa DENTRO del contenedor
-        const basePath = '/downloads/';
+        const basePath = '/downloads/'; // La ruta DENTRO del contenedor que mapea a tu carpeta del host
         const fullPath = path.join(basePath, subfolder, filename);
-
+        
         console.log(`[Service] Leyendo archivo local desde ruta completa: ${fullPath}`);
         const fileBuffer = await fs.readFile(fullPath);
         return fileBuffer.toString('base64');
@@ -311,6 +309,7 @@ async function getFileAsBase64(fileUrl) {
         throw new Error(`No se pudo leer el archivo: ${path.basename(fileUrl)}`);
     }
 }
+
 
 // --- FUNCIONES AUXILIARES ---
 const buildSecureFileUrl = (filename, isPublic = true, restaurantId = null) => {
