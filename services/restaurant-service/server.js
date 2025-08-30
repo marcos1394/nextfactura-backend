@@ -288,19 +288,12 @@ const authenticateToken = (req, res, next) => {
 async function getFileAsBase64(fileUrl) {
     try {
         const filename = path.basename(fileUrl);
-        let subfolder = '';
+        const subfolder = fileUrl.includes('/private/') ? 'private' : 'public';
 
-        // Determinamos si el archivo es público o privado basándonos en la URL
-        if (fileUrl.includes('/private/')) {
-            subfolder = 'private';
-        } else if (fileUrl.includes('/public/')) {
-            subfolder = 'public';
-        }
+        // La ruta correcta DENTRO del contenedor
+        const fullPath = path.join('/app/secure_uploads', subfolder, filename);
 
-        const basePath = '/downloads/'; // La ruta DENTRO del contenedor que mapea a tu carpeta del host
-        const fullPath = path.join(basePath, subfolder, filename);
-        
-        console.log(`[Service] Leyendo archivo local desde ruta completa: ${fullPath}`);
+        console.log(`[Service] Leyendo archivo local desde la ruta correcta: ${fullPath}`);
         const fileBuffer = await fs.readFile(fullPath);
         return fileBuffer.toString('base64');
 
@@ -309,7 +302,6 @@ async function getFileAsBase64(fileUrl) {
         throw new Error(`No se pudo leer el archivo: ${path.basename(fileUrl)}`);
     }
 }
-
 
 // --- FUNCIONES AUXILIARES ---
 const buildSecureFileUrl = (filename, isPublic = true, restaurantId = null) => {
