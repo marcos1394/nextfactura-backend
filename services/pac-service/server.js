@@ -257,6 +257,15 @@ const authenticateToken = (req, res, next) => {
     }
 };
 
+// Middleware para comunicación interna segura
+const authenticateService = (req, res, next) => {
+    const secretKey = req.headers['x-internal-secret'];
+    if (!secretKey || secretKey !== process.env.INTERNAL_SECRET_KEY) {
+        return res.status(403).json({ success: false, message: 'Acceso no autorizado.' });
+    }
+    next();
+};
+
 // --- Función auxiliar para obtener datos del restaurante ---
 async function getRestaurantData(restaurantId, authHeader) {
     const restaurantServiceUrl = process.env.RESTAURANT_SERVICE_URL;
@@ -291,56 +300,90 @@ async function getCertificates(restaurant) {
 // --- Rutas del Servicio de PAC ---
 
 // POST /stamp - Timbrar un nuevo CFDI
-app.post('/stamp', authenticateToken, async (req, res) => {
-    const { restaurantId, xmlBase64, rfcReceptor, total, esPrueba = false } = req.body;
-    const userId = req.user.id;
+// En services/pac-service/server.js
 
-    if (!restaurantId || !xmlBase64 || !rfcReceptor || !total) {
-        return res.status(400).json({ 
-            success: false, 
-            message: 'Se requiere restaurantId, xmlBase64, rfcReceptor y total.' 
-        });
+// Usa el nuevo middleware de autenticación interna
+app.post('/stamp', authenticateService, async (req, res) => {
+    const { ticket, ticketDetails, clientFiscalData, restaurantFiscalData } = req.body;
+    const userId = restaurantFiscalData.userId;
+    const restaurantId = restaurantFiscalData.id;
+
+    if (!ticket || !ticketDetails || !clientFiscalData || !restaurantFiscalData) {
+        return res.status(400).json({ success: false, message: 'Faltan datos para el timbrado.' });
     }
 
     try {
-        const restaurant = await getRestaurantData(restaurantId, req.headers.authorization);
-        const { rfc } = restaurant.FiscalData;
-        const { prodigiaContrato, prodigiaUsuario, prodigiaPassword } = restaurant;
-
-        if (!prodigiaContrato || !prodigiaUsuario || !prodigiaPassword) {
-            throw new Error('Credenciales de Prodigia no configuradas para este restaurante.');
-        }
-
-        const { certBase64, keyBase64, keyPass } = await getCertificates(restaurant);
-
-        const client = new ProdigiaClient(prodigiaContrato, prodigiaUsuario, prodigiaPassword);
-        const timbradoResponse = await client.timbrar(xmlBase64, certBase64, keyBase64, keyPass, esPrueba);
-        
-        if (timbradoResponse.codigo !== 0) {
-            return res.status(400).json({ 
-                success: false, 
-                message: `Error del PAC: ${timbradoResponse.mensaje}`, 
-                code: timbradoResponse.codigo 
-            });
-        }
-
-        const newCfdi = await Cfdi.create({
-            uuid: timbradoResponse.uuid,
-            restaurantId,
-            userId,
-            xmlBase64: timbradoResponse.xmlBase64,
-            pdfBase64: timbradoResponse.pdfBase64,
-            status: 'Vigente',
-            rfcEmisor: rfc,
-            rfcReceptor,
-            total: parseFloat(total)
+        // --- PASO 1: VERIFICAR Y USAR UN TIMBRE ---
+        logger.info(`[PAC-Service] Verificando timbres para el usuario ${userId}`);
+        const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:4003';
+        const stampResponse = await fetch(`${paymentServiceUrl}/internal/use-stamp`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId })
         });
 
-        res.status(201).json({ success: true, cfdi: newCfdi });
+        if (!stampResponse.ok) {
+            const errorData = await stampResponse.json();
+            // 402 Payment Required es el código correcto para "sin fondos/timbres"
+            return res.status(402).json({ success: false, message: errorData.message || 'No tienes timbres disponibles.' });
+        }
+        logger.info(`[PAC-Service] Timbre validado y descontado para el usuario ${userId}.`);
+
+
+        // --- PASO 2: CONSTRUIR EL XML DEL CFDI 4.0 ---
+        // Esta es una versión simplificada. La real puede ser mucho más compleja.
+        const xmlString = buildCfdiXml(restaurantFiscalData, clientFiscalData, ticket, ticketDetails);
+        const xmlBase64 = Buffer.from(xmlString).toString('base64');
+        logger.info('[PAC-Service] XML en Base64 generado.');
+
+        // --- PASO 3: DESCARGAR CERTIFICADOS DEL RESTAURANTE ---
+        const { csdCertificateUrl, csdKeyUrl, csdPassword } = restaurantFiscalData;
+        const [certBase64, keyBase64] = await Promise.all([
+            downloadFile(csdCertificateUrl),
+            downloadFile(csdKeyUrl)
+        ]);
+        
+        // --- PASO 4: TIMBRAR CON EL PAC USANDO CREDENCIALES GLOBALES ---
+        const client = new ProdigiaClient(
+            process.env.PRODIGIA_CONTRATO,
+            process.env.PRODIGIA_USUARIO,
+            process.env.PRODIGIA_PASSWORD
+        );
+        const timbradoResponse = await client.timbrar(xmlBase64, certBase64, keyBase64, csdPassword);
+
+        if (timbradoResponse.codigo !== 0) {
+            // Si el timbrado falla, debemos "devolver" el timbre al usuario.
+            logger.warn(`[PAC-Service] Fallo del PAC. Devolviendo timbre al usuario ${userId}.`);
+            await fetch(`${paymentServiceUrl}/internal/refund-stamp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId })
+            });
+            throw new Error(`Error del PAC (${timbradoResponse.codigo}): ${timbradoResponse.mensaje}`);
+        }
+        logger.info(`[PAC-Service] Timbrado exitoso. UUID: ${timbradoResponse.uuid}`);
+
+        // --- PASO 5: GUARDAR REGISTRO EN LA BASE DE DATOS ---
+        const newCfdi = await Cfdi.create({
+            uuid: timbradoResponse.uuid,
+            restaurantId, userId, status: 'Vigente',
+            xmlBase64: timbradoResponse.xmlBase64, pdfBase64: timbradoResponse.pdfBase64,
+            rfcEmisor: restaurantFiscalData.rfc, rfcReceptor: clientFiscalData.rfc,
+            total: ticket.amount
+        });
+        
+        // --- PASO 6: DEVOLVER RESPUESTA EXITOSA ---
+        res.status(201).json({
+            success: true,
+            message: 'Factura timbrada exitosamente.',
+            uuid: newCfdi.uuid,
+            xml: newCfdi.xmlBase64,
+            pdf: newCfdi.pdfBase64
+        });
 
     } catch (error) {
         logger.error('[PAC-Service /stamp] Error:', { error: error.message, stack: error.stack });
-        res.status(500).json({ success: false, message: error.message });
+        res.status(500).json({ success: false, message: error.message || 'Error interno en el servicio de timbrado.' });
     }
 });
 
