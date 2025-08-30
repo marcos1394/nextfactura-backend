@@ -47,6 +47,30 @@ const redisClient = redis.createClient({
 });
 
 redisClient.on('error', err => console.error('[Redis] Client Error', err));
+const subscriber = redisClient.duplicate(); // Cliente duplicado para suscripciones
+// El "radioescucha": se suscribe al canal de respuestas.
+subscriber.connect().then(() => {
+    console.log('[Restaurant-Service] Conectado a Redis como suscriptor.');
+    subscriber.subscribe('agent-responses', (message) => {
+        try {
+            const { correlationId, data, error } = JSON.parse(message);
+
+            // Si tenemos una petición esperando por este ID, la resolvemos
+            if (pendingRequests.has(correlationId)) {
+                const { resolve, reject } = pendingRequests.get(correlationId);
+                if (error) {
+                    reject(new Error(error));
+                } else {
+                    resolve(data);
+                }
+                // Limpiamos la petición de la "sala de espera"
+                pendingRequests.delete(correlationId);
+            }
+        } catch (e) {
+            console.error('[Restaurant-Service] Error procesando mensaje de Redis:', e);
+        }
+    });
+}).catch(err => console.error('[Restaurant-Service] No se pudo conectar a Redis como suscriptor.', err));
 
 // Conectar a Redis con manejo de errores
 redisClient.connect().catch(err => {
