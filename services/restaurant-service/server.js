@@ -908,7 +908,7 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
         }
         
         // La consulta para obtener los artículos específicos de ese ticket
-        const detailsQuery = `SELECT * FROM cheqdet WHERE numcheque = '${ticket.id.replace(/'/g, "''")}'`;
+        const detailsQuery = `SELECT * FROM cheqdet WHERE movimiento = '${ticket.id.replace(/'/g, "''")}'`;
         let ticketDetails;
 
         if (restaurant.connectionMethod === 'agent') {
