@@ -779,8 +779,8 @@ app.get('/portal-branding/:subdomain', async (req, res) => {
 });
 
 
-// 2. BUSCAR UN TICKET PARA FACTURAR
-// =======================================================
+// En services/restaurant-service/server.js
+
 app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
     const { restaurantId } = req.params;
     const { ticketNumber } = req.body;
@@ -790,14 +790,17 @@ app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
     }
 
     try {
+        // Obtenemos el restaurante y sus datos de conexión de una sola vez.
         const restaurant = await Restaurant.findByPk(restaurantId);
         if (!restaurant) {
             return res.status(404).json({ success: false, message: 'Restaurante no configurado.' });
         }
         
+        // Creamos la consulta SQL para buscar el ticket
         const query = `SELECT TOP 1 total, fecha FROM cheques WHERE numcheque = '${ticketNumber.replace(/'/g, "''")}' AND pagado = 1`;
         let ticketData;
 
+        // Decidimos la estrategia (Agente o Directa)
         if (restaurant.connectionMethod === 'agent') {
             const correlationId = uuidv4();
             const commandPromise = new Promise((resolve, reject) => {
@@ -810,6 +813,7 @@ app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
                 }, 30000); // Timeout de 30 segundos
             });
 
+            // Enviamos el comando al connector-service
             await fetch(`http://connector-service:4006/internal/send-command`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -822,11 +826,14 @@ app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
             });
 
             const agentResponse = await commandPromise;
-            ticketData = agentResponse[0]; // El agente devuelve un array, tomamos el primer resultado
+            ticketData = agentResponse[0]; // El agente devuelve un array
         } else {
+            // Usamos los datos de conexión del objeto 'restaurant' para la conexión directa
             const pool = await getConnectedPool({
-                user: restaurant.connectionUser, password: restaurant.connectionPassword,
-                server: restaurant.connectionHost, database: restaurant.connectionDbName,
+                user: restaurant.connectionUser, 
+                password: restaurant.connectionPassword,
+                server: restaurant.connectionHost, 
+                database: restaurant.connectionDbName,
                 port: restaurant.connectionPort,
             });
             const result = await pool.request().query(query);
