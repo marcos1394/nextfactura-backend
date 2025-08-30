@@ -51,25 +51,33 @@ const Cfdi = sequelize.define('Cfdi', {
 
 // La función ahora devuelve el Buffer del archivo, que es lo que 'facturajs' necesita
 // Reemplaza la función downloadFile existente con esta
+// En services/pac-service/server.js
+
 async function downloadFile(url) {
-    // Determinamos qué cliente usar (http o https) basándonos en el protocolo de la URL
-    const client = url.startsWith('https:') ? https : http;
+    // --- CORRECCIÓN CLAVE ---
+    // Reemplazamos 'localhost' o '127.0.0.1' con el nombre del servicio de Docker.
+    // Esto asegura que la petición se dirija al contenedor correcto dentro de la red de Docker.
+    const correctedUrl = new URL(url);
+    if (correctedUrl.hostname === 'localhost' || correctedUrl.hostname === '127.0.0.1') {
+        correctedUrl.hostname = 'restaurant-service';
+    }
+    // --- FIN DE LA CORRECCIÓN ---
+    
+    const client = correctedUrl.protocol === 'https:' ? https : http;
 
     return new Promise((resolve, reject) => {
-        client.get(url, (response) => {
+        // Usamos la URL corregida para la petición
+        client.get(correctedUrl.href, (response) => {
             if (response.statusCode !== 200) {
-                // Rechazamos la promesa si la respuesta no es exitosa
-                return reject(new Error(`Fallo al descargar archivo. Status Code: ${response.statusCode}`));
+                return reject(new Error(`Fallo al descargar archivo. Status: ${response.statusCode}`));
             }
-
+            
             const chunks = [];
             response.on('data', (chunk) => chunks.push(chunk));
             response.on('end', () => {
-                // Devolvemos el Buffer del archivo, que es lo que necesitan las librerías de CFDI
                 resolve(Buffer.concat(chunks));
             });
         }).on('error', (err) => {
-            // Rechazamos la promesa en caso de un error de red
             reject(err);
         });
     });
