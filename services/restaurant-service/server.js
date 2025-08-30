@@ -719,6 +719,33 @@ app.get('/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// En services/restaurant-service/server.js
+
+// --- NUEVO ENDPOINT PÚBLICO PARA DATOS DEL PORTAL ---
+// No lleva 'authenticateToken' porque es para clientes finales.
+app.get('/public/data/:restaurantId', async (req, res) => {
+    try {
+        const { restaurantId } = req.params;
+        const restaurant = await Restaurant.findByPk(restaurantId, {
+            include: [{
+                model: PortalConfig,
+                attributes: ['portalName', 'logoUrl', 'primaryColor']
+            }]
+        });
+
+        if (!restaurant) {
+            return res.status(404).json({ success: false, message: 'Restaurante no encontrado.' });
+        }
+        
+        // Devolvemos el objeto completo del restaurante con sus datos de portal anidados
+        res.status(200).json({ success: true, restaurant });
+
+    } catch (error) {
+        console.error(`[Service /public/data] Error:`, error);
+        res.status(500).json({ success: false, message: 'Error al obtener datos del restaurante.' });
+    }
+});
+
 // --- NUEVO ENDPOINT: Descarga Segura del Conector ---
 // Este endpoint es llamado por el FRONTEND de un usuario logueado.
 app.get('/connector/download', authenticateToken, async (req, res) => {
