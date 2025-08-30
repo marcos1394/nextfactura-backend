@@ -356,6 +356,40 @@ app.post('/webhook/mercadopago', async (req, res) => {
     res.sendStatus(200);
 });
 
+
+// Endpoint interno para verificar y descontar un timbre
+app.post('/internal/use-stamp', async (req, res) => {
+    const { userId } = req.body;
+
+    if (!userId) {
+        return res.status(400).json({ success: false, message: 'userId es requerido.' });
+    }
+
+    const transaction = await sequelize.transaction();
+    try {
+        const purchase = await PlanPurchase.findOne({
+            where: { userId, status: 'active' },
+            transaction
+        });
+
+        if (!purchase || purchase.timbres_used >= purchase.timbres_allocated) {
+            await transaction.rollback();
+            return res.status(402).json({ success: false, message: 'No tienes timbres disponibles.' });
+        }
+
+        purchase.timbres_used += 1;
+        await purchase.save({ transaction });
+        await transaction.commit();
+        
+        res.status(200).json({ success: true, remaining: purchase.timbres_allocated - purchase.timbres_used });
+
+    } catch (error) {
+        await transaction.rollback();
+        console.error('[Payment-Service /internal/use-stamp] Error:', error);
+        res.status(500).json({ success: false, message: 'Error al procesar el timbre.' });
+    }
+});
+
 // GET /status - Ruta protegida para que un usuario vea su plan actual
 app.get('/status', authenticateToken, async (req, res) => {
     try {

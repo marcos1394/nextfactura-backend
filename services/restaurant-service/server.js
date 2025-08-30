@@ -965,7 +965,8 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
                ticket: ticket,
                ticketDetails: ticketDetails, 
                clientFiscalData: clientFiscalData, 
-               restaurantFiscalData: restaurant.FiscalDatum 
+                restaurantFiscalData: { ...restaurant.FiscalDatum.toJSON(), userId: restaurant.userId }
+
             })
         });
 
