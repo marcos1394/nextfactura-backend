@@ -11,6 +11,7 @@ const jwt = require('jsonwebtoken');
 const fetch = require('node-fetch');
 const fs = require('fs').promises;
 const https = require('https');
+const http = require('http'); // Asegúrate de tener esta
 const Factura = require('facturajs'); // <-- IMPORTAMOS LA NUEVA LIBRERÍA
 
 
@@ -49,16 +50,28 @@ const Cfdi = sequelize.define('Cfdi', {
 // services/pac-service/server.js
 
 // La función ahora devuelve el Buffer del archivo, que es lo que 'facturajs' necesita
+// Reemplaza la función downloadFile existente con esta
 async function downloadFile(url) {
+    // Determinamos qué cliente usar (http o https) basándonos en el protocolo de la URL
+    const client = url.startsWith('https:') ? https : http;
+
     return new Promise((resolve, reject) => {
-        https.get(url, (response) => {
+        client.get(url, (response) => {
             if (response.statusCode !== 200) {
-                return reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage}`));
+                // Rechazamos la promesa si la respuesta no es exitosa
+                return reject(new Error(`Fallo al descargar archivo. Status Code: ${response.statusCode}`));
             }
+
             const chunks = [];
             response.on('data', (chunk) => chunks.push(chunk));
-            response.on('end', () => resolve(Buffer.concat(chunks)));
-        }).on('error', reject);
+            response.on('end', () => {
+                // Devolvemos el Buffer del archivo, que es lo que necesitan las librerías de CFDI
+                resolve(Buffer.concat(chunks));
+            });
+        }).on('error', (err) => {
+            // Rechazamos la promesa en caso de un error de red
+            reject(err);
+        });
     });
 }
 
