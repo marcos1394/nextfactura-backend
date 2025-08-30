@@ -8,6 +8,8 @@ const fs = require('fs').promises; // ⚠️ FALTABA ESTE IMPORT
 const path = require('path'); // ⚠️ FALTABA ESTE IMPORT
 require('dotenv').config();
 const { v4: uuidv4 } = require('uuid'); // <-- AÑADE ESTA LÍNEA
+const pendingRequests = new Map(); // <-- AÑADE ESTA LÍNEA
+
 
 
 // Importar el módulo de archivos seguros
