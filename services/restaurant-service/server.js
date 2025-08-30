@@ -284,6 +284,18 @@ const authenticateToken = (req, res, next) => {
     }
 };
 
+async function getFileAsBase64(filePath) {
+    try {
+        // La ruta base dentro del contenedor donde están los archivos
+        const basePath = '/downloads/'; 
+        const fullPath = path.join(basePath, path.basename(filePath));
+        const fileBuffer = await fs.readFile(fullPath);
+        return fileBuffer.toString('base64');
+    } catch (error) {
+        throw new Error(`No se pudo leer el archivo local: ${filePath}`);
+    }
+}
+
 // --- FUNCIONES AUXILIARES ---
 const buildSecureFileUrl = (filename, isPublic = true, restaurantId = null) => {
     if (!filename) return null;
@@ -892,6 +904,7 @@ app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
 // =======================================================
 // En services/restaurant-service/server.js
 
+// --- ENDPOINT FINAL Y COMPLETO ---
 app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
     const { restaurantId } = req.params;
     const { ticket, fiscalData: clientFiscalData } = req.body;
@@ -901,7 +914,7 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
     }
 
     try {
-        console.log(`[Service] Iniciando proceso de facturación para el ticket ${ticket.id}`);
+        console.log(`[Service] Iniciando proceso de facturación para el ticket ${ticket.id} del restaurante ${restaurantId}`);
 
         // --- 1. Obtener datos completos del Restaurante y detalles del Ticket ---
         const restaurant = await Restaurant.findByPk(restaurantId, { include: [FiscalData] });
@@ -950,23 +963,35 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
             return res.status(404).json({ success: false, message: 'No se encontraron los productos del ticket.' });
         }
 
-        // --- 2. Llamar al 'pac-service' para timbrar la factura (con cabecera de seguridad) ---
-        console.log(`[Service] Enviando datos al pac-service para timbrado.`);
+        // --- 2. Preparar y Enviar Datos al 'pac-service' ---
+        console.log(`[Service] Empaquetando y enviando datos al pac-service para timbrado.`);
+
+        // Leemos los certificados localmente y los convertimos a Base64
+        const certBase64 = await getFileAsBase64(restaurant.FiscalDatum.csdCertificateUrl);
+        const keyBase64 = await getFileAsBase64(restaurant.FiscalDatum.csdKeyUrl);
+        
         const pacServiceUrl = process.env.PAC_SERVICE_URL || 'http://pac-service:4005';
         
         const pacResponse = await fetch(`${pacServiceUrl}/stamp`, {
            method: 'POST',
            headers: { 
                'Content-Type': 'application/json',
-               // --- LÍNEA AÑADIDA: Autenticación interna ---
                'X-Internal-Secret': process.env.INTERNAL_SECRET_KEY 
             },
            body: JSON.stringify({ 
                ticket: ticket,
                ticketDetails: ticketDetails, 
                clientFiscalData: clientFiscalData, 
-                restaurantFiscalData: { ...restaurant.FiscalDatum.toJSON(), userId: restaurant.userId }
-
+               restaurantFiscalData: {
+                   ...restaurant.FiscalDatum.toJSON(),
+                   userId: restaurant.userId, // Añadimos el userId para la lógica de timbres
+                   id: restaurant.id
+               },
+               csd: {
+                   certBase64,
+                   keyBase64,
+                   password: restaurant.FiscalDatum.csdPassword
+               }
             })
         });
 
@@ -976,28 +1001,19 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
             throw new Error(invoiceResult.message || 'El servicio de timbrado no pudo generar la factura.');
         }
 
-        // --- 3. Guardar un registro de la factura en tu base de datos (lógica real) ---
-        await Cfdi.create({
-            restaurantId: restaurantId,
-            uuid: invoiceResult.uuid, // El UUID que devuelve el PAC
-            ticketId: ticket.id,
-            clientRfc: clientFiscalData.rfc,
-            total: ticket.amount,
-            xmlUrl: invoiceResult.xmlUrl,  // Asumiendo que el PAC devuelve las URLs
-            pdfUrl: invoiceResult.pdfUrl,
-        });
-        console.log(`[Service] Factura con UUID ${invoiceResult.uuid} guardada en la base de datos.`);
-
-        // --- 4. Enviar la factura por correo (lógica real) ---
-        // Aquí llamarías a tu servicio de envío de correos
-        await emailService.sendInvoice(clientFiscalData.email, invoiceResult.pdfUrl, invoiceResult.xmlUrl);
+        // En este punto, el pac-service ya guardó la factura en la tabla 'cfdis'.
+        console.log(`[Service] Factura con UUID ${invoiceResult.uuid} generada exitosamente por el pac-service.`);
+        
+        // --- 3. (Opcional) Enviar la factura por correo ---
+        // Aquí podrías tener una llamada a un futuro 'email-service'
+         await emailService.sendInvoice(clientFiscalData.email, invoiceResult.pdf, invoiceResult.xml);
         console.log(`[Service] Notificación de factura enviada a ${clientFiscalData.email}.`);
         
-        // --- RESPUESTA FINAL ---
+        // --- 4. RESPUESTA FINAL AL CLIENTE ---
         res.status(200).json({
             success: true,
             message: `Factura generada y enviada a ${clientFiscalData.email}.`,
-            invoiceId: invoiceResult.uuid // Devolvemos el ID de la factura
+            invoiceId: invoiceResult.uuid
         });
 
     } catch (error) {
