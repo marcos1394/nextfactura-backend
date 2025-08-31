@@ -941,21 +941,28 @@ app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
 // --- ENDPOINT FINAL Y COMPLETO ---
 // En services/restaurant-service/server.js
 app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
-    const { restaurantId } = req.params;
+   const { restaurantId } = req.params;
     const { ticket, fiscalData: clientFiscalData } = req.body;
+    const logPrefix = `[Service /generate-invoice]`; // Prefijo para todos los logs
+
+    logger.info(`${logPrefix} Petición recibida para ticket ${ticket?.id} del restaurante ${restaurantId}`);
 
     if (!ticket || !clientFiscalData) {
+        logger.warn(`${logPrefix} Petición inválida: Faltan datos del ticket o fiscales.`);
         return res.status(400).json({ success: false, message: 'Faltan datos del ticket o fiscales.' });
     }
 
     try {
-        console.log(`[Service] Iniciando proceso de facturación para el ticket ${ticket.id} del restaurante ${restaurantId}`);
-
+        // --- 1. Obtener datos del Restaurante ---
+        logger.info(`${logPrefix} Paso 1: Obteniendo datos del restaurante desde la BD.`);
         const restaurant = await Restaurant.findByPk(restaurantId, { include: [FiscalData] });
         if (!restaurant || !restaurant.FiscalDatum) {
+            logger.error(`${logPrefix} Restaurante o sus datos fiscales no encontrados en la BD. ID: ${restaurantId}`);
             return res.status(404).json({ success: false, message: 'Datos fiscales del restaurante no encontrados.' });
         }
-        
+        logger.info(`${logPrefix} Restaurante "${restaurant.name}" encontrado. Método de conexión: ${restaurant.connectionMethod}.`);
+
+        // --- 2. Obtener detalles completos del Ticket ---
         const detailsQuery = `SELECT cd.cantidad, cd.precio, p.descripcion FROM cheqdet cd JOIN Productos p ON cd.idproducto = p.idproducto WHERE cd.movimiento = '${ticket.id.replace(/'/g, "''")}'`;
         let ticketDetails;
 
