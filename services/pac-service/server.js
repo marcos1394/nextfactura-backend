@@ -12,8 +12,7 @@ const fetch = require('node-fetch');
 const fs = require('fs').promises;
 const https = require('https');
 const http = require('http'); // Asegúrate de tener esta
-const Factura = require('facturajs'); // <-- IMPORTAMOS LA NUEVA LIBRERÍA
-
+const { Factura } = require('facturajs');
 
 const app = express();
 app.use(cors());
