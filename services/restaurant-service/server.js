@@ -959,8 +959,20 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
         }
         
         // --- 2. Obtener detalles completos del Ticket ---
-        const detailsQuery = `SELECT * FROM cheqdet WHERE movimiento = '${ticket.id.replace(/'/g, "''")}'`;
+        // En /portal/:restaurantId/generate-invoice
+
+const detailsQuery = `
+    SELECT 
+        cd.cantidad,
+        cd.precio,
+        p.descripcion
+    FROM cheqdet cd
+    JOIN Productos p ON cd.idproducto = p.idproducto
+    WHERE cd.movimiento = '${ticket.id.replace(/'/g, "''")}'
+`;
+console.log(detailsQuery)
         let ticketDetails;
+        console.log(ticketDetails)
 
         if (restaurant.connectionMethod === 'agent') {
             // --- ESTRATEGIA CON AGENTE (LÓGICA COMPLETA) ---

@@ -144,6 +144,8 @@ function createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFi
     const cert = new crypto.X509Certificate(certFileContent);
     const noCertificado = cert.serialNumber;
     const certificadoB64 = cert.raw.toString('base64');
+    const descripcionSegura = (item.descripcion || 'Concepto sin descripción').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+    console.log(descripcionSegura)
     
     const conceptos = ticketDetails.map(item => {
         const importe = parseFloat((item.cantidad * item.precio).toFixed(2));
