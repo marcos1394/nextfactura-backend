@@ -134,6 +134,8 @@ function buildCadenaOriginal(cfdiObject) {
     return parts.join('|');
 }
 
+// En services/pac-service/server.js
+
 function createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFiscalData, csd) {
     logger.info('[PAC-Service] Iniciando construcción y sellado de CFDI 4.0.');
     
@@ -144,16 +146,23 @@ function createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFi
     const cert = new crypto.X509Certificate(certFileContent);
     const noCertificado = cert.serialNumber;
     const certificadoB64 = cert.raw.toString('base64');
-    const descripcionSegura = (item.descripcion || 'Concepto sin descripción').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
-    console.log(descripcionSegura)
     
     const conceptos = ticketDetails.map(item => {
         const importe = parseFloat((item.cantidad * item.precio).toFixed(2));
+        
+        // El saneamiento de la descripción se hace aquí, DENTRO del bucle.
+        const descripcionSegura = (item.descripcion || 'Concepto sin descripción')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
+
         return {
             '@ClaveProdServ': '01010101',
             '@Cantidad': item.cantidad,
             '@ClaveUnidad': 'E48',
-            '@Descripcion': item.descripcion.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;'),
+            '@Descripcion': descripcionSegura, // Usamos la variable segura
             '@ValorUnitario': item.precio.toFixed(2),
             '@Importe': importe.toFixed(2),
             '@ObjetoImp': '02',
@@ -176,6 +185,7 @@ function createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFi
             '@Moneda': 'MXN', '@Total': total.toFixed(2),
             '@TipoDeComprobante': 'I', '@Exportacion': '01', '@MetodoPago': 'PUE',
             '@LugarExpedicion': restaurantFiscalData.zipCode,
+            '@Sello': '', // Se llena después
             'cfdi:Emisor': {
                 '@Rfc': restaurantFiscalData.rfc,
                 '@Nombre': restaurantFiscalData.businessName,
@@ -192,7 +202,7 @@ function createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFi
         }
     };
     
-    const cadenaOriginal = buildCadenaOriginal(cfdiObject);
+    const cadenaOriginal = buildCadenaOriginal(cfdiObject); // Asumiendo que buildCadenaOriginal está definida
     
     const sign = crypto.createSign('RSA-SHA256');
     sign.update(cadenaOriginal);
