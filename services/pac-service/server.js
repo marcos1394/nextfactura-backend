@@ -322,11 +322,11 @@ async function getCertificates(restaurant) {
 
 // POST /stamp - Timbrar un nuevo CFDI
 app.post('/stamp', authenticateService, async (req, res) => {
-    const { ticket, ticketDetails, clientFiscalData, restaurantFiscalData } = req.body;
+    const { ticket, ticketDetails, clientFiscalData, restaurantFiscalData, csd } = req.body;
     const userId = restaurantFiscalData.userId;
     const restaurantId = restaurantFiscalData.id;
 
-    if (!ticket || !ticketDetails || !clientFiscalData || !restaurantFiscalData) {
+    if (!ticket || !ticketDetails || !clientFiscalData || !restaurantFiscalData || !csd) {
         return res.status(400).json({ success: false, message: 'Faltan datos para el timbrado.' });
     }
 
@@ -346,27 +346,25 @@ app.post('/stamp', authenticateService, async (req, res) => {
         }
         logger.info(`[PAC-Service] Timbre validado y descontado para el usuario ${userId}.`);
 
-        // --- PASO 2: DESCARGAR CERTIFICADOS (CSD) ---
-        const { csdCertificateUrl, csdKeyUrl, csdPassword } = restaurantFiscalData;
-        const [certFileContent, keyFileContent] = await Promise.all([
-            downloadFile(csdCertificateUrl), // Esta función debe devolver un Buffer
-            downloadFile(csdKeyUrl)
-        ]);
+        // --- PASO 2: OBTENER CERTIFICADOS (ya vienen en el body) ---
+        const { certBase64, keyBase64, password: csdPassword } = csd;
+        const certFileContent = Buffer.from(certBase64, 'base64');
+        const keyFileContent = Buffer.from(keyBase64, 'base64');
         
         // --- PASO 3: CREAR Y SELLAR EL CFDI CON FACTURAJS ---
         const subTotal = ticketDetails.reduce((acc, item) => acc + (item.cantidad * item.precio), 0);
-        const iva = subTotal * 0.16; // Asumiendo IVA 16% para todos los productos
+        const iva = subTotal * 0.16; // Asumiendo IVA 16%
         const total = subTotal + iva;
 
         const cfdi = new Factura({
-            Serie: 'A', // Puedes hacerlo configurable por restaurante
+            Serie: 'A',
             Folio: ticket.id,
             Fecha: new Date().toISOString().slice(0, 19),
             LugarExpedicion: restaurantFiscalData.zipCode,
             Moneda: 'MXN',
             TipoDeComprobante: 'I',
             MetodoPago: 'PUE',
-            FormaPago: '01', // TODO: Este dato debería venir del ticket
+            FormaPago: '01', // TODO: Dato del ticket
             SubTotal: subTotal,
             Total: total,
             Exportacion: '01',
@@ -383,9 +381,9 @@ app.post('/stamp', authenticateService, async (req, res) => {
                 UsoCFDI: 'G03',
             },
             Conceptos: ticketDetails.map(item => ({
-                ClaveProdServ: item.claveProdServ || '01010101', // TODO: Mapear a catálogo SAT
+                ClaveProdServ: item.claveProdServ || '01010101',
                 Cantidad: item.cantidad,
-                ClaveUnidad: item.claveUnidad || 'E48', // TODO: Mapear a catálogo SAT
+                ClaveUnidad: item.claveUnidad || 'E48',
                 Descripcion: item.descripcion,
                 ValorUnitario: item.precio,
                 Importe: item.cantidad * item.precio,
@@ -395,16 +393,15 @@ app.post('/stamp', authenticateService, async (req, res) => {
 
         cfdi.sellar(keyFileContent, csdPassword);
         const xmlString = cfdi.xml();
-        const xmlBase64 = Buffer.from(xmlString).toString('base64');
-        logger.info('[PAC-Service] XML sellado y listo para enviar al PAC.');
-
-        // --- PASO 4: TIMBRAR CON PRODIGIA USANDO CREDENCIALES GLOBALES ---
+        const finalXmlBase64 = Buffer.from(xmlString).toString('base64');
+        
+        // --- PASO 4: TIMBRAR CON PRODIGIA ---
         const client = new ProdigiaClient(
             process.env.PRODIGIA_CONTRATO,
             process.env.PRODIGIA_USUARIO,
             process.env.PRODIGIA_PASSWORD
         );
-        const timbradoResponse = await client.timbrar(xmlBase64, false); // false para modo producción
+        const timbradoResponse = await client.timbrar(finalXmlBase64);
 
         if (timbradoResponse.codigo !== 0) {
             logger.warn(`[PAC-Service] Fallo del PAC. Devolviendo timbre al usuario ${userId}.`);
@@ -415,14 +412,11 @@ app.post('/stamp', authenticateService, async (req, res) => {
             });
             throw new Error(`Error del PAC (${timbradoResponse.codigo}): ${timbradoResponse.mensaje}`);
         }
-        logger.info(`[PAC-Service] Timbrado exitoso. UUID: ${timbradoResponse.uuid}`);
-
-        // --- PASO 5: GUARDAR REGISTRO EN LA BASE DE DATOS ---
+        
+        // --- PASO 5: GUARDAR EN BASE DE DATOS ---
         const newCfdi = await Cfdi.create({
             uuid: timbradoResponse.uuid,
-            restaurantId,
-            userId,
-            status: 'Vigente',
+            restaurantId, userId, status: 'Vigente',
             xmlBase64: timbradoResponse.xmlBase64,
             pdfBase64: timbradoResponse.pdfBase64,
             rfcEmisor: restaurantFiscalData.rfc,

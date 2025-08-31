@@ -939,6 +939,9 @@ app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
 // En services/restaurant-service/server.js
 
 // --- ENDPOINT FINAL Y COMPLETO ---
+// En services/restaurant-service/server.js
+
+// --- ENDPOINT FINAL Y COMPLETO ---
 app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
     const { restaurantId } = req.params;
     const { ticket, fiscalData: clientFiscalData } = req.body;
@@ -948,7 +951,7 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
     }
 
     try {
-        console.log(`[Service] Iniciando proceso de facturación para el ticket ${ticket.id} del restaurante ${restaurantId}`);
+        console.log(`[Service] Iniciando proceso de facturación para el ticket ${ticket.id}`);
 
         // --- 1. Obtener datos completos del Restaurante y detalles del Ticket ---
         const restaurant = await Restaurant.findByPk(restaurantId, { include: [FiscalData] });
@@ -983,6 +986,7 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
             });
             ticketDetails = await commandPromise;
         } else {
+            // Lógica de conexión directa
             const pool = await getConnectedPool({
                 user: restaurant.connectionUser, password: restaurant.connectionPassword,
                 server: restaurant.connectionHost, database: restaurant.connectionDbName,
@@ -1000,7 +1004,6 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
         // --- 2. Preparar y Enviar Datos al 'pac-service' ---
         console.log(`[Service] Empaquetando y enviando datos al pac-service para timbrado.`);
 
-        // Leemos los certificados localmente y los convertimos a Base64
         const certBase64 = await getFileAsBase64(restaurant.FiscalDatum.csdCertificateUrl);
         const keyBase64 = await getFileAsBase64(restaurant.FiscalDatum.csdKeyUrl);
         
@@ -1018,7 +1021,7 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
                clientFiscalData: clientFiscalData, 
                restaurantFiscalData: {
                    ...restaurant.FiscalDatum.toJSON(),
-                   userId: restaurant.userId, // Añadimos el userId para la lógica de timbres
+                   userId: restaurant.userId,
                    id: restaurant.id
                },
                csd: {
@@ -1031,17 +1034,27 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
 
         const invoiceResult = await pacResponse.json();
 
-        if (!pacResponse.ok || !invoiceResult.success) {
+        if (!pacResponse.ok) { // No necesitamos la doble validación de 'success'
             throw new Error(invoiceResult.message || 'El servicio de timbrado no pudo generar la factura.');
         }
 
-        // En este punto, el pac-service ya guardó la factura en la tabla 'cfdis'.
         console.log(`[Service] Factura con UUID ${invoiceResult.uuid} generada exitosamente por el pac-service.`);
         
-        // --- 3. (Opcional) Enviar la factura por correo ---
-        // Aquí podrías tener una llamada a un futuro 'email-service'
-         await emailService.sendInvoice(clientFiscalData.email, invoiceResult.pdf, invoiceResult.xml);
-        console.log(`[Service] Notificación de factura enviada a ${clientFiscalData.email}.`);
+        // --- 3. Enviar la factura por correo usando el notification-service ---
+        console.log(`[Service] Solicitando envío de correo a ${clientFiscalData.email}.`);
+        const notificationServiceUrl = process.env.NOTIFICATION_SERVICE_URL || 'http://notification-service:4007';
+        
+        await fetch(`${notificationServiceUrl}/send-invoice`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                recipientEmail: clientFiscalData.email,
+                pdfBase64: invoiceResult.pdf,
+                xmlBase64: invoiceResult.xml,
+                clientName: clientFiscalData.razonSocial,
+                restaurantName: restaurant.name
+            })
+        });
         
         // --- 4. RESPUESTA FINAL AL CLIENTE ---
         res.status(200).json({
