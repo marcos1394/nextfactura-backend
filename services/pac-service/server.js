@@ -202,11 +202,22 @@ function createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFi
         }
     };
     
-    const cadenaOriginal = buildCadenaOriginal(cfdiObject); // Asumiendo que buildCadenaOriginal está definida
+    const cadenaOriginal = buildCadenaOriginal(cfdiObject);
     
+    // --- CORRECCIÓN CLAVE ---
+    // 1. Creamos el "adaptador" para la llave privada, pasándole la contraseña.
+    const privateKey = crypto.createPrivateKey({
+        key: keyFileContent,
+        passphrase: csdPassword,
+        format: 'pem', // Formato estándar de las llaves del SAT
+        type: 'pkcs8'
+    });
+
+    // 2. Usamos el 'adaptador' (privateKey) para firmar.
     const sign = crypto.createSign('RSA-SHA256');
     sign.update(cadenaOriginal);
-    const sello = sign.sign(keyFileContent, 'base64');
+    const sello = sign.sign(privateKey, 'base64');
+    // --- FIN DE LA CORRECCIÓN ---
     
     cfdiObject['cfdi:Comprobante']['@Sello'] = sello;
     const xmlFinal = create(cfdiObject).end({ prettyPrint: true });
