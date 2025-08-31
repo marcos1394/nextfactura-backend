@@ -941,7 +941,6 @@ app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
 // --- ENDPOINT FINAL Y COMPLETO ---
 // En services/restaurant-service/server.js
 
-// --- ENDPOINT FINAL Y COMPLETO ---
 app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
     const { restaurantId } = req.params;
     const { ticket, fiscalData: clientFiscalData } = req.body;
@@ -951,18 +950,21 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
     }
 
     try {
-        console.log(`[Service] Iniciando proceso de facturación para el ticket ${ticket.id}`);
+        console.log(`[Service] Iniciando proceso de facturación para el ticket ${ticket.id} del restaurante ${restaurantId}`);
 
-        // --- 1. Obtener datos completos del Restaurante y detalles del Ticket ---
+        // --- 1. Obtener datos del Restaurante ---
         const restaurant = await Restaurant.findByPk(restaurantId, { include: [FiscalData] });
         if (!restaurant || !restaurant.FiscalDatum) {
             return res.status(404).json({ success: false, message: 'Datos fiscales del restaurante no encontrados.' });
         }
         
+        // --- 2. Obtener detalles completos del Ticket ---
         const detailsQuery = `SELECT * FROM cheqdet WHERE movimiento = '${ticket.id.replace(/'/g, "''")}'`;
         let ticketDetails;
 
         if (restaurant.connectionMethod === 'agent') {
+            // --- ESTRATEGIA CON AGENTE (LÓGICA COMPLETA) ---
+            console.log(`[Service] Usando AGENTE para obtener detalles del ticket.`);
             const correlationId = uuidv4();
             const commandPromise = new Promise((resolve, reject) => {
                 pendingRequests.set(correlationId, { resolve, reject });
@@ -985,11 +987,15 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
                 })
             });
             ticketDetails = await commandPromise;
+
         } else {
-            // Lógica de conexión directa
+            // --- ESTRATEGIA DE CONEXIÓN DIRECTA (LÓGICA COMPLETA) ---
+            console.log(`[Service] Usando CONEXIÓN DIRECTA para obtener detalles del ticket.`);
             const pool = await getConnectedPool({
-                user: restaurant.connectionUser, password: restaurant.connectionPassword,
-                server: restaurant.connectionHost, database: restaurant.connectionDbName,
+                user: restaurant.connectionUser,
+                password: restaurant.connectionPassword,
+                server: restaurant.connectionHost,
+                database: restaurant.connectionDbName,
                 port: restaurant.connectionPort,
             });
             const result = await pool.request().query(detailsQuery);
@@ -1001,9 +1007,8 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
             return res.status(404).json({ success: false, message: 'No se encontraron los productos del ticket.' });
         }
 
-        // --- 2. Preparar y Enviar Datos al 'pac-service' ---
+        // --- 3. Preparar y Enviar Datos al 'pac-service' ---
         console.log(`[Service] Empaquetando y enviando datos al pac-service para timbrado.`);
-
         const certBase64 = await getFileAsBase64(restaurant.FiscalDatum.csdCertificateUrl);
         const keyBase64 = await getFileAsBase64(restaurant.FiscalDatum.csdKeyUrl);
         
@@ -1033,17 +1038,13 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
         });
 
         const invoiceResult = await pacResponse.json();
-
-        if (!pacResponse.ok) { // No necesitamos la doble validación de 'success'
+        if (!pacResponse.ok) {
             throw new Error(invoiceResult.message || 'El servicio de timbrado no pudo generar la factura.');
         }
 
+        // --- 4. Enviar Correo y Responder ---
         console.log(`[Service] Factura con UUID ${invoiceResult.uuid} generada exitosamente por el pac-service.`);
-        
-        // --- 3. Enviar la factura por correo usando el notification-service ---
-        console.log(`[Service] Solicitando envío de correo a ${clientFiscalData.email}.`);
         const notificationServiceUrl = process.env.NOTIFICATION_SERVICE_URL || 'http://notification-service:4007';
-        
         await fetch(`${notificationServiceUrl}/send-invoice`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1055,8 +1056,8 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
                 restaurantName: restaurant.name
             })
         });
+        console.log(`[Service] Notificación de factura enviada a ${clientFiscalData.email}.`);
         
-        // --- 4. RESPUESTA FINAL AL CLIENTE ---
         res.status(200).json({
             success: true,
             message: `Factura generada y enviada a ${clientFiscalData.email}.`,
@@ -1068,6 +1069,7 @@ app.post('/portal/:restaurantId/generate-invoice', async (req, res) => {
         res.status(500).json({ success: false, message: error.message || 'Error al generar la factura.' });
     }
 });
+
 // --- MIDDLEWARE DE ERROR GLOBAL ---
 app.use((err, req, res, next) => {
     console.error('Error no manejado:', err);
