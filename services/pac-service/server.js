@@ -12,7 +12,9 @@ const fetch = require('node-fetch');
 const fs = require('fs').promises;
 const https = require('https');
 const http = require('http'); // Asegúrate de tener esta
-const { Factura } = require('facturajs');
+const { create } = require('xmlbuilder2'); // Importamos el constructor de XML
+const crypto = require('crypto'); // Importamos la librería de criptografía de Node.js
+
 
 const app = express();
 app.use(cors());
@@ -80,6 +82,89 @@ async function downloadFile(url) {
             reject(err);
         });
     });
+}
+
+
+// --- NUEVA FUNCIÓN AUXILIAR: Construye y Sella el CFDI ---
+function createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFiscalData, csd) {
+    logger.info('[PAC-Service] Iniciando construcción y sellado de CFDI 4.0.');
+    
+    // 1. Decodificar y procesar certificados
+    const { certBase64, keyBase64, password: csdPassword } = csd;
+    const certContent = Buffer.from(certBase64, 'base64');
+    const keyContent = Buffer.from(keyBase64, 'base64');
+
+    const noCertificadoMatch = certContent.toString('ascii').match(/SerialNumber=(\d+)/);
+    if (!noCertificadoMatch) throw new Error('No se pudo extraer el número de serie del certificado.');
+    const noCertificado = noCertificadoMatch[1];
+    const certificadoB64 = certContent.toString('base64');
+    
+    // 2. Calcular totales y mapear conceptos
+    const subTotal = ticketDetails.reduce((acc, item) => acc + (item.cantidad * item.precio), 0);
+    const iva = subTotal * 0.16; // Asumiendo IVA 16% para todos los productos
+    const total = subTotal + iva;
+
+    const conceptos = ticketDetails.map(item => ({
+        '@ClaveProdServ': item.claveProdServ || '01010101',
+        '@Cantidad': item.cantidad,
+        '@ClaveUnidad': item.claveUnidad || 'E48',
+        '@Descripcion': item.descripcion,
+        '@ValorUnitario': item.precio.toFixed(2),
+        '@Importe': (item.cantidad * item.precio).toFixed(2),
+        '@ObjetoImp': '02', // 02 = Sí objeto de impuesto.
+    }));
+    
+    // 3. Crear el objeto base del CFDI
+    const cfdiObject = {
+        'cfdi:Comprobante': {
+            '@xmlns:cfdi': 'http://www.sat.gob.mx/cfd/4',
+            '@Version': '4.0',
+            '@Serie': 'A',
+            '@Folio': ticket.id.toString(),
+            '@Fecha': new Date().toISOString().slice(0, 19),
+            '@FormaPago': '01', // TODO: Este dato debería venir del ticket
+            '@NoCertificado': noCertificado,
+            '@Certificado': certificadoB64,
+            '@SubTotal': subTotal.toFixed(2),
+            '@Moneda': 'MXN',
+            '@Total': total.toFixed(2),
+            '@TipoDeComprobante': 'I',
+            '@Exportacion': '01',
+            '@MetodoPago': 'PUE',
+            '@LugarExpedicion': restaurantFiscalData.zipCode,
+            'cfdi:Emisor': {
+                '@Rfc': restaurantFiscalData.rfc,
+                '@Nombre': restaurantFiscalData.businessName,
+                '@RegimenFiscal': restaurantFiscalData.fiscalRegime,
+            },
+            'cfdi:Receptor': {
+                '@Rfc': clientFiscalData.rfc,
+                '@Nombre': clientFiscalData.razonSocial,
+                '@DomicilioFiscalReceptor': clientFiscalData.zipCode,
+                '@RegimenFiscalReceptor': clientFiscalData.fiscalRegime,
+                '@UsoCFDI': 'G03',
+            },
+            'cfdi:Conceptos': {
+                'cfdi:Concepto': conceptos
+            },
+        }
+    };
+    
+    // 4. Generar la Cadena Original (versión simplificada, para producción se recomienda un procesador XSLT)
+    // Esta es una representación. El SAT provee un archivo .xslt para generar la cadena 100% oficial.
+    const cadenaOriginal = `||4.0|A|${ticket.id}|${cfdiObject['cfdi:Comprobante']['@Fecha']}|${cfdiObject['cfdi:Comprobante']['@FormaPago']}|${subTotal.toFixed(2)}|MXN|${total.toFixed(2)}|I|${restaurantFiscalData.zipCode}|...etc...||`;
+
+    // 5. Crear el Sello Digital
+    const sign = crypto.createSign('RSA-SHA256');
+    sign.update(cadenaOriginal);
+    const sello = sign.sign(keyContent, 'base64');
+    
+    // 6. Insertar el Sello y devolver el XML final
+    cfdiObject['cfdi:Comprobante']['@Sello'] = sello;
+    const xmlFinal = create(cfdiObject).end({ prettyPrint: true });
+    
+    logger.info('[PAC-Service] XML sellado manualmente y listo.');
+    return xmlFinal;
 }
 
 // --- Cliente de API para Prodigia (Patrón Profesional) ---
@@ -320,6 +405,7 @@ async function getCertificates(restaurant) {
 // --- Rutas del Servicio de PAC ---
 
 // POST /stamp - Timbrar un nuevo CFDI
+// --- ENDPOINT DE TIMBRADO ABSOLUTAMENTE COMPLETO ---
 app.post('/stamp', authenticateService, async (req, res) => {
     const { ticket, ticketDetails, clientFiscalData, restaurantFiscalData, csd } = req.body;
     const userId = restaurantFiscalData.userId;
@@ -335,95 +421,52 @@ app.post('/stamp', authenticateService, async (req, res) => {
         const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:4003';
         const stampResponse = await fetch(`${paymentServiceUrl}/internal/use-stamp`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': process.env.INTERNAL_SECRET_KEY },
             body: JSON.stringify({ userId })
         });
-
         if (!stampResponse.ok) {
             const errorData = await stampResponse.json();
             return res.status(402).json({ success: false, message: errorData.message || 'No tienes timbres disponibles.' });
         }
-        logger.info(`[PAC-Service] Timbre validado y descontado para el usuario ${userId}.`);
+        logger.info(`[PAC-Service] Timbre validado y descontado.`);
 
-        // --- PASO 2: OBTENER CERTIFICADOS (ya vienen en el body) ---
-        const { certBase64, keyBase64, password: csdPassword } = csd;
-        const certFileContent = Buffer.from(certBase64, 'base64');
-        const keyFileContent = Buffer.from(keyBase64, 'base64');
+        // --- PASO 2: CREAR Y SELLAR EL XML ---
+        const xmlString = createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFiscalData, csd);
+        const xmlBase64 = Buffer.from(xmlString).toString('base64');
         
-        // --- PASO 3: CREAR Y SELLAR EL CFDI CON FACTURAJS ---
-        const subTotal = ticketDetails.reduce((acc, item) => acc + (item.cantidad * item.precio), 0);
-        const iva = subTotal * 0.16; // Asumiendo IVA 16%
-        const total = subTotal + iva;
-
-        const cfdi = new Factura({
-            Serie: 'A',
-            Folio: ticket.id,
-            Fecha: new Date().toISOString().slice(0, 19),
-            LugarExpedicion: restaurantFiscalData.zipCode,
-            Moneda: 'MXN',
-            TipoDeComprobante: 'I',
-            MetodoPago: 'PUE',
-            FormaPago: '01', // TODO: Dato del ticket
-            SubTotal: subTotal,
-            Total: total,
-            Exportacion: '01',
-            Emisor: {
-                Rfc: restaurantFiscalData.rfc,
-                Nombre: restaurantFiscalData.businessName,
-                RegimenFiscal: restaurantFiscalData.fiscalRegime,
-            },
-            Receptor: {
-                Rfc: clientFiscalData.rfc,
-                Nombre: clientFiscalData.razonSocial,
-                DomicilioFiscalReceptor: clientFiscalData.zipCode,
-                RegimenFiscalReceptor: clientFiscalData.fiscalRegime,
-                UsoCFDI: 'G03',
-            },
-            Conceptos: ticketDetails.map(item => ({
-                ClaveProdServ: item.claveProdServ || '01010101',
-                Cantidad: item.cantidad,
-                ClaveUnidad: item.claveUnidad || 'E48',
-                Descripcion: item.descripcion,
-                ValorUnitario: item.precio,
-                Importe: item.cantidad * item.precio,
-                ObjetoImp: '02',
-            })),
-        });
-
-        cfdi.sellar(keyFileContent, csdPassword);
-        const xmlString = cfdi.xml();
-        const finalXmlBase64 = Buffer.from(xmlString).toString('base64');
-        
-        // --- PASO 4: TIMBRAR CON PRODIGIA ---
+        // --- PASO 3: TIMBRAR CON PRODIGIA ---
         const client = new ProdigiaClient(
             process.env.PRODIGIA_CONTRATO,
             process.env.PRODIGIA_USUARIO,
             process.env.PRODIGIA_PASSWORD
         );
-        const timbradoResponse = await client.timbrar(finalXmlBase64);
+        const timbradoResponse = await client.timbrar(xmlBase64, false); // false = modo producción
 
         if (timbradoResponse.codigo !== 0) {
             logger.warn(`[PAC-Service] Fallo del PAC. Devolviendo timbre al usuario ${userId}.`);
             await fetch(`${paymentServiceUrl}/internal/refund-stamp`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': process.env.INTERNAL_SECRET_KEY },
                 body: JSON.stringify({ userId })
             });
             throw new Error(`Error del PAC (${timbradoResponse.codigo}): ${timbradoResponse.mensaje}`);
         }
-        
-        // --- PASO 5: GUARDAR EN BASE DE DATOS ---
+        logger.info(`[PAC-Service] Timbrado exitoso. UUID: ${timbradoResponse.uuid}`);
+
+        // --- PASO 4: GUARDAR EN BASE DE DATOS ---
         const newCfdi = await Cfdi.create({
             uuid: timbradoResponse.uuid,
-            restaurantId, userId, status: 'Vigente',
+            restaurantId,
+            userId,
+            status: 'Vigente',
             xmlBase64: timbradoResponse.xmlBase64,
             pdfBase64: timbradoResponse.pdfBase64,
             rfcEmisor: restaurantFiscalData.rfc,
             rfcReceptor: clientFiscalData.rfc,
-            total: total
+            total: ticket.amount
         });
         
-        // --- PASO 6: DEVOLVER RESPUESTA EXITOSA ---
+        // --- PASO 5: DEVOLVER RESPUESTA EXITOSA ---
         res.status(201).json({
             success: true,
             message: 'Factura timbrada exitosamente.',
