@@ -291,25 +291,30 @@ async function sendEmail(to, subject, html) {
 }
 
 const authenticateToken = async (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.status(401).json({ success: false, message: 'Acceso denegado. Token no proporcionado.' });
+    // Para la web, el token viene en la cookie. Para la mobile, en la cabecera.
+    const tokenFromHeader = req.headers['authorization']?.split(' ')[1];
+    const token = tokenFromHeader || req.cookies.accessToken;
+
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'Token de acceso no proporcionado.' });
+    }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET, { ignoreExpiration: false });
-
-        // Si Redis está conectado, revisa la lista negra
-        if (redisClient.isOpen) {
-            const isBlacklisted = await redisClient.get(`blacklist:${decoded.jti}`);
-            if (isBlacklisted) {
-                return res.status(401).json({ success: false, message: 'Token revocado. Por favor, inicia sesión de nuevo.' });
-            }
-        }
-
+        // Intenta verificar el token. Si ha expirado, jwt.verify lanzará un error.
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = decoded;
-        next();
+        return next();
     } catch (err) {
-        return res.status(403).json({ success: false, message: 'Token inválido o expirado.' });
+        // Si el error es específicamente porque el token expiró, enviamos un mensaje claro.
+        if (err.name === 'TokenExpiredError') {
+            // El interceptor de Axios en el frontend usará este mensaje para intentar refrescar el token.
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Token de acceso expirado.' 
+            });
+        }
+        // Para cualquier otro error (malformado, firma inválida)
+        return res.status(403).json({ success: false, message: 'Token de acceso inválido.' });
     }
 };
 // --- Middleware de Auditoría ---
