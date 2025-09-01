@@ -18,11 +18,16 @@ const qrcode = require('qrcode'); // Para generar códigos QR para 2FA
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const redis = require('redis'); // <-- Asegúrate de que esta línea esté
+const cookieParser = require('cookie-parser');
+
 
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+app.use(cookieParser()); // Usa el middleware
+
+
 //app.use(passport.initialize());
 
 
