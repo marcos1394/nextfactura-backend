@@ -229,6 +229,8 @@ function createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFi
 
 // --- Cliente de API para Prodigia (Patrón Profesional) ---
 // Centraliza la lógica de comunicación con el PAC.
+// En services/pac-service/server.js
+
 class ProdigiaClient {
     constructor(contrato, usuario, password) {
         this.baseURL = process.env.PRODIGIA_API_URL || 'https://timbrado.pade.mx/servicio/rest';
@@ -237,18 +239,7 @@ class ProdigiaClient {
     }
 
     async _request(path, method = 'POST', body = null, queryParams = {}) {
-        // Añadimos el contrato a todos los queryParams por defecto
-        queryParams.contrato = this.contrato;
-        const params = new URLSearchParams();
-        
-        Object.entries(queryParams).forEach(([key, value]) => {
-            if (Array.isArray(value)) {
-                value.forEach(val => params.append(key, val));
-            } else if (value !== undefined && value !== null) {
-                params.append(key, value);
-            }
-        });
-
+        const params = new URLSearchParams(queryParams);
         const url = `${this.baseURL}${path}?${params.toString()}`;
 
         const options = {
@@ -272,6 +263,12 @@ class ProdigiaClient {
             return { success: true };
         }
 
+        // --- CORRECCIÓN CLAVE: Verificamos si la respuesta es HTML ---
+        if (responseText.trim().startsWith('<')) {
+            logger.error('[ProdigiaClient] Error: PAC devolvió HTML.', { html: responseText.substring(0, 500) });
+            throw new Error('El PAC devolvió una respuesta inesperada (HTML). Revisa los parámetros de la petición.');
+        }
+
         const data = JSON.parse(responseText);
 
         if (!response.ok) {
@@ -283,9 +280,11 @@ class ProdigiaClient {
         return data;
     }
 
+    // --- MÉTODO CORREGIDO ---
     async timbrarDesdeJson(cfdiJson, certBase64, keyBase64, keyPass, esPrueba = false) {
         const body = {
             cfdiJson,
+            contrato: this.contrato, // El contrato ahora va en el body
             certBase64,
             keyBase64,
             keyPass
@@ -295,35 +294,6 @@ class ProdigiaClient {
             opciones: ["GENERAR_PDF", "RESPUESTA_JSON"]
         };
         return this._request('/timbrado40/timbrarCfdi', 'POST', body, queryParams);
-    }
-    
-    async cancelar(rfcEmisor, arregloUUID, certBase64, keyBase64, keyPass) {
-        const body = { certBase64, keyBase64, keyPass };
-        const queryParams = {
-            rfcEmisor,
-            // Simplemente pasamos el array. La función _request se encargará de formatearlo.
-            arregloUUID: arregloUUID
-        };
-        return this._request('/cancelacion/cancelar', 'POST', body, queryParams);
-    }
-
-    async consultarEstatus(uuid, rfcEmisor, rfcReceptor, total) {
-        const queryParams = {
-            uuid,
-            rfcEmisor,
-            rfcReceptor,
-            total: total.toString()
-        };
-        // Este endpoint no envía body
-        return this._request('/cancelacion/consultarEstatusComprobante', 'POST', null, queryParams);
-    }
-    
-    async enviarPorCorreo(uuid, destinatarios) {
-        const body = {
-            uuid,
-            destinatarios // string de correos separados por coma
-        };
-        return this._request('/timbrado40/enviarXmlAndPdfPorCorreo', 'POST', body);
     }
 }
 
