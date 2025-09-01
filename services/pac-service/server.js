@@ -361,13 +361,12 @@ app.post('/stamp', authenticateService, async (req, res) => {
     const userId = restaurantFiscalData.userId;
     const restaurantId = restaurantFiscalData.id;
 
-    // 1. Validación de entrada
     if (!ticket || !ticketDetails || !clientFiscalData || !restaurantFiscalData || !csd) {
         return res.status(400).json({ success: false, message: 'Faltan datos para el timbrado.' });
     }
 
     try {
-        // --- PASO 1: VERIFICAR Y DESCONTAR UN TIMBRE ---
+        // --- PASO 1: VERIFICAR Y USAR UN TIMBRE ---
         logger.info(`[PAC-Service] Verificando timbres para el usuario ${userId}`);
         const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:4003';
         const stampResponse = await fetch(`${paymentServiceUrl}/internal/use-stamp`, {
@@ -381,48 +380,57 @@ app.post('/stamp', authenticateService, async (req, res) => {
         }
         logger.info(`[PAC-Service] Timbre validado y descontado.`);
 
-        // --- PASO 2: CONSTRUIR EL OBJETO JSON PARA EL PAC ---
+        // --- PASO 2: EXTRAER DATOS DEL CERTIFICADO ---
+        const { certBase64, keyBase64, password: csdPassword } = csd;
+        const certFileContent = Buffer.from(certBase64, 'base64');
+        const cert = new crypto.X509Certificate(certFileContent);
+        
+        // Obtenemos el número de serie y el contenido en Base64 del certificado
+        const noCertificado = cert.serialNumber;
+        const certificadoB64 = cert.raw.toString('base64');
+
+        // --- PASO 3: CONSTRUIR EL OBJETO JSON COMPLETO PARA EL PAC ---
         const subTotal = ticketDetails.reduce((acc, item) => acc + (item.cantidad * item.precio), 0);
-        const total = subTotal * 1.16; // Asumiendo IVA 16%. En un sistema real, esto debería calcularse con más detalle.
+        const total = subTotal * 1.16; // Asumiendo IVA 16%.
 
         const cfdiJson = {
-            Serie: "A",
-            Folio: ticket.id.toString(),
-            Fecha: new Date().toISOString().slice(0, 19),
-            LugarExpedicion: restaurantFiscalData.zipCode,
-            Moneda: "MXN",
-            TipoDeComprobante: "I",
-            MetodoPago: "PUE",
-            FormaPago: "01", // Este dato debería venir del ticket o ser configurable. "01" es Efectivo.
-            SubTotal: subTotal,
-            Total: total,
-            Exportacion: "01",
-            Emisor: {
-                Rfc: restaurantFiscalData.rfc,
-                Nombre: restaurantFiscalData.businessName,
-                RegimenFiscal: restaurantFiscalData.fiscalRegime,
+            "noCertificado": noCertificado,
+            "certificado": certificadoB64,
+            "Serie": "A",
+            "Folio": ticket.id.toString(),
+            "Fecha": new Date().toISOString().slice(0, 19),
+            "LugarExpedicion": restaurantFiscalData.zipCode,
+            "Moneda": "MXN",
+            "TipoDeComprobante": "I",
+            "MetodoPago": "PUE",
+            "FormaPago": "01",
+            "SubTotal": subTotal,
+            "Total": total,
+            "Exportacion": "01",
+            "Emisor": {
+                "Rfc": restaurantFiscalData.rfc,
+                "Nombre": restaurantFiscalData.businessName,
+                "RegimenFiscal": restaurantFiscalData.fiscalRegime,
             },
-            Receptor: {
-                Rfc: clientFiscalData.rfc,
-                Nombre: clientFiscalData.razonSocial,
-                DomicilioFiscalReceptor: clientFiscalData.zipCode,
-                RegimenFiscalReceptor: clientFiscalData.fiscalRegime,
-                UsoCFDI: "G03", // Gastos en general
+            "Receptor": {
+                "Rfc": clientFiscalData.rfc,
+                "Nombre": clientFiscalData.razonSocial,
+                "DomicilioFiscalReceptor": clientFiscalData.zipCode,
+                "RegimenFiscalReceptor": clientFiscalData.fiscalRegime,
+                "UsoCFDI": "G03",
             },
-            Conceptos: ticketDetails.map(item => ({
-                ClaveProdServ: "01010101", // Código genérico del SAT
-                Cantidad: item.cantidad,
-                ClaveUnidad: "E48", // Unidad de servicio
-                Descripcion: item.descripcion,
-                ValorUnitario: item.precio,
-                Importe: item.cantidad * item.precio,
-                ObjetoImp: "02", // Sí es objeto de impuesto
+            "Conceptos": ticketDetails.map(item => ({
+                "ClaveProdServ": "01010101",
+                "Cantidad": item.cantidad,
+                "ClaveUnidad": "E48",
+                "Descripcion": item.descripcion,
+                "ValorUnitario": item.precio,
+                "Importe": item.cantidad * item.precio,
+                "ObjetoImp": "02",
             })),
         };
-
-        // --- PASO 3: TIMBRAR USANDO EL MÉTODO JSON DE PRODIGIA ---
-        const { certBase64, keyBase64, password: csdPassword } = csd;
         
+        // --- PASO 4: TIMBRAR USANDO EL MÉTODO JSON DE PRODIGIA ---
         const client = new ProdigiaClient(
             process.env.PRODIGIA_CONTRATO,
             process.env.PRODIGIA_USUARIO,
@@ -430,7 +438,7 @@ app.post('/stamp', authenticateService, async (req, res) => {
         );
         
         logger.info(`[PAC-Service] Enviando petición de timbrado a Prodigia.`);
-        const timbradoResponse = await client.timbrarDesdeJson(cfdiJson, certBase64, keyBase64, csdPassword, true); // true para modo prueba
+        const timbradoResponse = await client.timbrarDesdeJson(cfdiJson, certBase64, keyBase64, csdPassword, true);
 
         if (timbradoResponse.codigo !== 0) {
             logger.warn(`[PAC-Service] Fallo del PAC (${timbradoResponse.codigo}). Devolviendo timbre al usuario ${userId}.`);
@@ -443,7 +451,7 @@ app.post('/stamp', authenticateService, async (req, res) => {
         }
         logger.info(`[PAC-Service] Timbrado exitoso. UUID: ${timbradoResponse.uuid}`);
 
-        // --- PASO 4: GUARDAR REGISTRO EN LA BASE DE DATOS ---
+        // --- PASO 5: GUARDAR REGISTRO EN LA BASE DE DATOS ---
         const newCfdi = await Cfdi.create({
             uuid: timbradoResponse.uuid,
             restaurantId: restaurantFiscalData.id,
@@ -456,7 +464,7 @@ app.post('/stamp', authenticateService, async (req, res) => {
             total: total
         });
         
-        // --- PASO 5: DEVOLVER RESPUESTA EXITOSA ---
+        // --- PASO 6: DEVOLVER RESPUESTA EXITOSA ---
         res.status(201).json({
             success: true,
             message: 'Factura timbrada exitosamente.',
