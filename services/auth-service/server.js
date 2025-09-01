@@ -452,6 +452,55 @@ app.post('/password/reset', async (req, res) => {
     }
 });
 
+// En services/auth-service/server.js
+
+app.post('/refresh-token', async (req, res) => {
+    // El refreshToken puede venir del body (mobile) o de la cookie (web)
+    const incomingRefreshToken = req.body.refreshToken || req.cookies.refreshToken;
+
+    if (!incomingRefreshToken) {
+        return res.status(401).json({ success: false, message: 'No se proporcionó token de refresco.' });
+    }
+
+    try {
+        // 1. Verificamos la firma y la caducidad del refresh token
+        const decoded = jwt.verify(incomingRefreshToken, process.env.JWT_REFRESH_SECRET);
+        const userId = decoded.id;
+
+        // 2. Buscamos TODOS los refresh tokens de ese usuario en la BD
+        const userTokens = await RefreshToken.findAll({ where: { userId } });
+        if (!userTokens.length) {
+            return res.status(403).json({ success: false, message: 'Token de refresco no encontrado.' });
+        }
+        
+        // 3. Comparamos el token recibido con los que están guardados (hasheados)
+        let validTokenFound = false;
+        for (const tokenRecord of userTokens) {
+            const isMatch = await bcrypt.compare(incomingRefreshToken, tokenRecord.token);
+            if (isMatch && tokenRecord.expiresAt > new Date()) {
+                validTokenFound = true;
+                break;
+            }
+        }
+
+        if (!validTokenFound) {
+            return res.status(403).json({ success: false, message: 'Token de refresco inválido o expirado.' });
+        }
+
+        // 4. Si es válido, generamos un nuevo Access Token
+        const accessTokenPayload = { id: decoded.id, email: decoded.email, role: decoded.role };
+        const newAccessToken = jwt.sign(accessTokenPayload, process.env.JWT_SECRET, { expiresIn: '15m' });
+
+        res.json({
+            success: true,
+            accessToken: `Bearer ${newAccessToken}`
+        });
+
+    } catch (error) {
+        console.error("[Auth-Service /refresh-token] ERROR:", error);
+        return res.status(403).json({ success: false, message: 'Token de refresco inválido o expirado.' });
+    }
+});
 // --- Rutas para Social Login ---
 // GET /auth/google - Redirige al usuario a Google para autenticarse
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
