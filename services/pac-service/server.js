@@ -236,176 +236,94 @@ class ProdigiaClient {
         this.contrato = contrato;
     }
 
-    async _request(path, method = 'POST', body = null, queryParams = null, contentType = 'application/json') {
-        let url = `${this.baseURL}${path}`;
-        if (queryParams) {
-            const params = new URLSearchParams();
-            Object.keys(queryParams).forEach(key => {
-                if (Array.isArray(queryParams[key])) {
-                    queryParams[key].forEach(val => params.append(key, val));
-                } else {
-                    params.append(key, queryParams[key]);
-                }
-            });
-            url += '?' + params.toString();
-        }
+    async _request(path, method = 'POST', body = null, queryParams = {}) {
+        // Añadimos el contrato a todos los queryParams por defecto
+        queryParams.contrato = this.contrato;
+        const params = new URLSearchParams();
+        
+        Object.entries(queryParams).forEach(([key, value]) => {
+            if (Array.isArray(value)) {
+                value.forEach(val => params.append(key, val));
+            } else if (value !== undefined && value !== null) {
+                params.append(key, value);
+            }
+        });
+
+        const url = `${this.baseURL}${path}?${params.toString()}`;
 
         const options = {
             method,
             headers: {
                 'Authorization': this.authHeader,
-                'Content-Type': contentType
+                'Content-Type': 'application/json'
             }
         };
         
         if (body) {
-            if (contentType === 'application/json') {
-                options.body = JSON.stringify(body);
-            } else {
-                options.body = body;
-            }
+            options.body = JSON.stringify(body);
         }
 
         logger.info(`[ProdigiaClient] Requesting: ${method} ${url}`);
         const response = await fetch(url, options);
         
-        let data;
-        try {
-            data = await response.json();
-        } catch (error) {
-            const textData = await response.text();
-            logger.error('[ProdigiaClient] Response not JSON:', textData);
-            throw new Error('Respuesta del PAC no es JSON válido');
+        const responseText = await response.text();
+        if (!responseText) {
+            if (!response.ok) throw new Error(`Error ${response.status}: ${response.statusText}`);
+            return { success: true };
         }
+
+        const data = JSON.parse(responseText);
 
         if (!response.ok) {
             logger.error('[ProdigiaClient] Error Response:', data);
-            throw new Error(data.mensaje || 'Error en la comunicación con el PAC.');
+            throw new Error(data.mensaje || `Error del PAC: ${response.statusText}`);
         }
         
         logger.info('[ProdigiaClient] Response OK');
         return data;
     }
 
-    async timbrar(xmlBase64, certBase64, keyBase64, keyPass, esPrueba = false) {
+    async timbrarDesdeJson(cfdiJson, certBase64, keyBase64, keyPass, esPrueba = false) {
         const body = {
-            contrato: this.contrato,
-            xmlBase64,
-            certBase64,
-            keyBase64,
-            keyPass,
-            prueba: esPrueba,
-            opciones: ["GENERAR_PDF", "RESPUESTA_JSON"] // Solicitamos el PDF y respuesta JSON
-        };
-        return this._request('/timbrado40/timbrarCfdi', 'POST', body);
-    }
-    
-    // Método para cancelar uno o más CFDI
-    async cancelar(rfcEmisor, arregloUUID, certBase64, keyBase64, keyPass) {
-        const queryParams = {
-            contrato: this.contrato,
-            rfcEmisor
-        };
-        
-        // Agregar cada UUID del arreglo como parámetro separado
-        arregloUUID.forEach((uuid, index) => {
-            queryParams[`arregloUUID[${index}]`] = uuid;
-        });
-
-        const body = {
+            cfdiJson,
             certBase64,
             keyBase64,
             keyPass
         };
-        
-        return this._request('/cancelacion/cancelar', 'POST', body, queryParams, 'application/xml');
+        const queryParams = {
+            prueba: esPrueba,
+            opciones: ["GENERAR_PDF", "RESPUESTA_JSON"]
+        };
+        return this._request('/timbrado40/timbrarCfdi', 'POST', body, queryParams);
+    }
+    
+    async cancelar(rfcEmisor, arregloUUID, certBase64, keyBase64, keyPass) {
+        const body = { certBase64, keyBase64, keyPass };
+        const queryParams = {
+            rfcEmisor,
+            // Simplemente pasamos el array. La función _request se encargará de formatearlo.
+            arregloUUID: arregloUUID
+        };
+        return this._request('/cancelacion/cancelar', 'POST', body, queryParams);
     }
 
-    // Método para consultar el estatus de un CFDI
     async consultarEstatus(uuid, rfcEmisor, rfcReceptor, total) {
         const queryParams = {
-            contrato: this.contrato,
             uuid,
             rfcEmisor,
             rfcReceptor,
             total: total.toString()
         };
-        return this._request('/cancelacion/consultarEstatusComprobante', 'POST', null, queryParams, 'application/xml');
+        // Este endpoint no envía body
+        return this._request('/cancelacion/consultarEstatusComprobante', 'POST', null, queryParams);
     }
-
-    // Método para enviar un CFDI por correo
+    
     async enviarPorCorreo(uuid, destinatarios) {
         const body = {
-            contrato: this.contrato,
             uuid,
             destinatarios // string de correos separados por coma
         };
         return this._request('/timbrado40/enviarXmlAndPdfPorCorreo', 'POST', body);
-    }
-
-    // Método para recuperar CFDI por UUID
-    async recuperarCfdiPorUUID(uuid) {
-        const queryParams = {
-            contrato: this.contrato,
-            uuid
-        };
-        return this._request('/consulta/cfdPorUUID', 'GET', null, queryParams);
-    }
-
-    // Método para recuperar acuse de cancelación
-    async recuperarAcuseCancelacion(uuid) {
-        const queryParams = {
-            contrato: this.contrato,
-            uuid
-        };
-        return this._request('/consulta/acuseCancelacion', 'GET', null, queryParams);
-    }
-
-    // Método para responder solicitud de cancelación
-    async responderSolicitudCancelacion(rfcReceptor, arregloUUID, certBase64, keyBase64, keyPass) {
-        const queryParams = {
-            contrato: this.contrato,
-            rfcReceptor
-        };
-
-        arregloUUID.forEach((uuid, index) => {
-            queryParams[`arregloUUID[${index}]`] = uuid;
-        });
-
-        const body = {
-            certBase64,
-            keyBase64,
-            keyPass
-        };
-
-        return this._request('/cancelacion/responderSolicitudCancelacion', 'POST', body, queryParams, 'application/xml');
-    }
-
-    // Método para consultar peticiones pendientes
-    async consultarPeticionesPendientes(rfcReceptor) {
-        const queryParams = {
-            contrato: this.contrato,
-            rfcReceptor
-        };
-        return this._request('/cancelacion/consultarPeticionesPendientes', 'POST', null, queryParams, 'application/xml');
-    }
-
-    // Método para consultar CFDI relacionados
-    async consultarCfdiRelacionados(uuid, rfcEmisor, rfcReceptor, certBase64, keyBase64, keyPass) {
-        const queryParams = {
-            contrato: this.contrato,
-            uuid,
-            rfcEmisor,
-            rfcReceptor
-        };
-
-        const body = {
-            certBase64,
-            keyBase64,
-            keyPass
-        };
-
-        return this._request('/cancelacion/consultarCfdiRelacionados', 'GET', body, queryParams, 'application/xml');
     }
 }
 
@@ -466,18 +384,22 @@ async function getCertificates(restaurant) {
 
 // POST /stamp - Timbrar un nuevo CFDI
 // --- ENDPOINT DE TIMBRADO ABSOLUTAMENTE COMPLETO ---
+// En services/pac-service/server.js
+
 app.post('/stamp', authenticateService, async (req, res) => {
     const { ticket, ticketDetails, clientFiscalData, restaurantFiscalData, csd } = req.body;
     const userId = restaurantFiscalData.userId;
     const restaurantId = restaurantFiscalData.id;
 
+    // 1. Validación de entrada
     if (!ticket || !ticketDetails || !clientFiscalData || !restaurantFiscalData || !csd) {
         return res.status(400).json({ success: false, message: 'Faltan datos para el timbrado.' });
     }
 
     try {
-        const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:4003';
+        // --- PASO 1: VERIFICAR Y DESCONTAR UN TIMBRE ---
         logger.info(`[PAC-Service] Verificando timbres para el usuario ${userId}`);
+        const paymentServiceUrl = process.env.PAYMENT_SERVICE_URL || 'http://payment-service:4003';
         const stampResponse = await fetch(`${paymentServiceUrl}/internal/use-stamp`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': process.env.INTERNAL_SECRET_KEY },
@@ -489,39 +411,82 @@ app.post('/stamp', authenticateService, async (req, res) => {
         }
         logger.info(`[PAC-Service] Timbre validado y descontado.`);
 
-        const xmlString = createAndSealCfdi(ticket, ticketDetails, clientFiscalData, restaurantFiscalData, csd);
-        const xmlBase64 = Buffer.from(xmlString).toString('base64');
+        // --- PASO 2: CONSTRUIR EL OBJETO JSON PARA EL PAC ---
+        const subTotal = ticketDetails.reduce((acc, item) => acc + (item.cantidad * item.precio), 0);
+        const total = subTotal * 1.16; // Asumiendo IVA 16%. En un sistema real, esto debería calcularse con más detalle.
+
+        const cfdiJson = {
+            Serie: "A",
+            Folio: ticket.id.toString(),
+            Fecha: new Date().toISOString().slice(0, 19),
+            LugarExpedicion: restaurantFiscalData.zipCode,
+            Moneda: "MXN",
+            TipoDeComprobante: "I",
+            MetodoPago: "PUE",
+            FormaPago: "01", // Este dato debería venir del ticket o ser configurable. "01" es Efectivo.
+            SubTotal: subTotal,
+            Total: total,
+            Exportacion: "01",
+            Emisor: {
+                Rfc: restaurantFiscalData.rfc,
+                Nombre: restaurantFiscalData.businessName,
+                RegimenFiscal: restaurantFiscalData.fiscalRegime,
+            },
+            Receptor: {
+                Rfc: clientFiscalData.rfc,
+                Nombre: clientFiscalData.razonSocial,
+                DomicilioFiscalReceptor: clientFiscalData.zipCode,
+                RegimenFiscalReceptor: clientFiscalData.fiscalRegime,
+                UsoCFDI: "G03", // Gastos en general
+            },
+            Conceptos: ticketDetails.map(item => ({
+                ClaveProdServ: "01010101", // Código genérico del SAT
+                Cantidad: item.cantidad,
+                ClaveUnidad: "E48", // Unidad de servicio
+                Descripcion: item.descripcion,
+                ValorUnitario: item.precio,
+                Importe: item.cantidad * item.precio,
+                ObjetoImp: "02", // Sí es objeto de impuesto
+            })),
+        };
+
+        // --- PASO 3: TIMBRAR USANDO EL MÉTODO JSON DE PRODIGIA ---
+        const { certBase64, keyBase64, password: csdPassword } = csd;
         
         const client = new ProdigiaClient(
             process.env.PRODIGIA_CONTRATO,
             process.env.PRODIGIA_USUARIO,
             process.env.PRODIGIA_PASSWORD
         );
-        const timbradoResponse = await client.timbrar(xmlBase64, false);
+        
+        logger.info(`[PAC-Service] Enviando petición de timbrado a Prodigia.`);
+        const timbradoResponse = await client.timbrarDesdeJson(cfdiJson, certBase64, keyBase64, csdPassword, true); // true para modo prueba
 
         if (timbradoResponse.codigo !== 0) {
-            logger.warn(`[PAC-Service] Fallo del PAC. Devolviendo timbre al usuario ${userId}.`);
+            logger.warn(`[PAC-Service] Fallo del PAC (${timbradoResponse.codigo}). Devolviendo timbre al usuario ${userId}.`);
             await fetch(`${paymentServiceUrl}/internal/refund-stamp`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-Internal-Secret': process.env.INTERNAL_SECRET_KEY },
                 body: JSON.stringify({ userId })
             });
-            throw new Error(`Error del PAC (${timbradoResponse.codigo}): ${timbradoResponse.mensaje}`);
+            throw new Error(`Error del PAC: ${timbradoResponse.mensaje}`);
         }
         logger.info(`[PAC-Service] Timbrado exitoso. UUID: ${timbradoResponse.uuid}`);
 
+        // --- PASO 4: GUARDAR REGISTRO EN LA BASE DE DATOS ---
         const newCfdi = await Cfdi.create({
             uuid: timbradoResponse.uuid,
-            restaurantId,
-            userId,
+            restaurantId: restaurantFiscalData.id,
+            userId: userId,
             status: 'Vigente',
             xmlBase64: timbradoResponse.xmlBase64,
             pdfBase64: timbradoResponse.pdfBase64,
             rfcEmisor: restaurantFiscalData.rfc,
             rfcReceptor: clientFiscalData.rfc,
-            total: ticket.amount
+            total: total
         });
         
+        // --- PASO 5: DEVOLVER RESPUESTA EXITOSA ---
         res.status(201).json({
             success: true,
             message: 'Factura timbrada exitosamente.',
