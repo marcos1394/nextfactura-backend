@@ -233,6 +233,16 @@ const FiscalData = sequelize.define('FiscalData', {
     timestamps: true
 });
 
+const RefreshToken = sequelize.define('RefreshToken', {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    userId: { type: DataTypes.UUID, allowNull: false },
+    token: { type: DataTypes.TEXT, allowNull: false }, // Guardaremos el token hasheado
+    expiresAt: { type: DataTypes.DATE, allowNull: false }
+}, { tableName: 'refresh_tokens', timestamps: true });
+
+// Define la relación
+User.hasMany(RefreshToken, { foreignKey: 'userId' });
+RefreshToken.belongsTo(User, { foreignKey: 'userId' });
 
 
 // --- Definición de Relaciones ---
@@ -351,95 +361,6 @@ app.get('/health', (req, res) => {
 });
 
 
-// auth-service/server.js
-// POST /login (Versión con Logs Detallados y Medición de Rendimiento)
-app.post('/login', async (req, res) => {
-    // Log para confirmar que la petición LLEGÓ al endpoint.
-    console.log(`[Auth-Service /login] Petición recibida para el email: ${req.body.email}`);
-    
-    const { email, password } = req.body;
-    
-    try {
-        // --- 1. Búsqueda del Usuario ---
-        console.log(`[Auth-Service /login] Paso 1: Buscando usuario en la base de datos...`);
-        console.time('DB_USER_LOOKUP'); // Inicia el cronómetro
-        const user = await User.findOne({ where: { email: email.toLowerCase() } });
-        console.timeEnd('DB_USER_LOOKUP'); // Detiene y muestra el tiempo
-
-        if (!user) {
-            console.warn(`[Auth-Service /login] ADVERTENCIA: Usuario no encontrado con el email: ${email}`);
-            return res.status(401).json({ success: false, message: 'Credenciales inválidas.' });
-        }
-        console.log(`[Auth-Service /login] ÉXITO: Usuario encontrado con ID: ${user.id}`);
-
-        // --- 1.5. Comparación de Contraseña (la operación más lenta) ---
-        console.log(`[Auth-Service /login] Paso 1.5: Comparando contraseña con bcrypt...`);
-        console.time('BCRYPT_COMPARE'); // Inicia el cronómetro
-        const isMatch = await bcrypt.compare(password, user.password);
-        console.timeEnd('BCRYPT_COMPARE'); // Detiene y muestra el tiempo
-
-        if (!isMatch) {
-            console.warn(`[Auth-Service /login] ADVERTENCIA: Contraseña incorrecta para el usuario: ${email}`);
-            return res.status(401).json({ success: false, message: 'Credenciales inválidas.' });
-        }
-        console.log(`[Auth-Service /login] ÉXITO: La contraseña coincide.`);
-
-        // --- Chequeo de 2FA ---
-        if (user.isTwoFactorEnabled) {
-            console.log(`[Auth-Service /login] INFO: 2FA está activado. Solicitando código.`);
-            return res.status(200).json({ 
-                success: true, 
-                twoFactorRequired: true, 
-                message: "Por favor, ingresa tu código de autenticación." 
-            });
-        }
-        
-        // --- 2. Búsqueda de Suscripción ---
-        console.log(`[Auth-Service /login] Paso 2: Verificando suscripción activa...`);
-        const activeSubscription = await PlanPurchase.findOne({
-            where: { 
-                userId: user.id,
-                status: 'active'
-            }
-        });
-        console.log(`[Auth-Service /login] INFO: ¿Tiene plan activo? ${!!activeSubscription}`);
-
-        // --- 3. Conteo de Restaurantes ---
-        console.log(`[Auth-Service /login] Paso 3: Contando restaurantes...`);
-        const restaurantCount = await Restaurant.count({
-            where: { userId: user.id }
-        });
-        console.log(`[Auth-Service /login] INFO: Número de restaurantes: ${restaurantCount}`);
-        
-        const userStatus = {
-            hasPlan: !!activeSubscription,
-            hasRestaurant: restaurantCount > 0
-        };
-
-        // --- 4. Generación del Token ---
-        console.log(`[Auth-Service /login] Paso 4: Generando token JWT...`);
-        const jti = crypto.randomUUID();
-        const tokenPayload = { id: user.id, email: user.email, role: user.role, jti: jti };
-        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
-        
-        const userResponse = user.toJSON();
-        delete userResponse.password;
-        
-        console.log(`[Auth-Service /login] ÉXITO FINAL: Enviando respuesta con token y estado del usuario.`);
-        res.json({ 
-            success: true, 
-            token: `Bearer ${token}`, 
-            user: userResponse,
-            status: userStatus
-        });
-
-    } catch (error) {
-        // Log para cualquier error inesperado en el proceso.
-        console.error(`[Auth-Service /login] ERROR CATASTRÓFICO durante el login para ${email}:`, error);
-        res.status(500).json({ success: false, message: 'Error interno del servidor.' });
-    }
-});
-
 // GET /me
 app.get('/me', authenticateToken, async (req, res) => {
     try {
@@ -541,6 +462,69 @@ app.get('/auth/google/callback', passport.authenticate('google', { session: fals
   }
 );
 
+// En services/auth-service/server.js
+
+app.post('/login', async (req, res) => {
+    const { email, password } = req.body;
+    
+    try {
+        const user = await User.findOne({ where: { email: email.toLowerCase() } });
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'Credenciales inválidas.' });
+        }
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(401).json({ success: false, message: 'Credenciales inválidas.' });
+        }
+
+        // 1. Generación de Tokens
+        const accessToken = jwt.sign(
+            { id: user.id, email: user.email, role: user.role },
+            process.env.JWT_SECRET,
+            { expiresIn: '15m' }
+        );
+        const refreshToken = jwt.sign(
+            { id: user.id },
+            process.env.JWT_REFRESH_SECRET,
+            { expiresIn: '7d' }
+        );
+
+        // 2. Hashear y Guardar el Refresh Token en la Base de Datos
+        const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+        const expirationDate = new Date();
+        expirationDate.setDate(expirationDate.getDate() + 7); // 7 días de validez
+
+        await RefreshToken.create({
+            userId: user.id,
+            token: hashedRefreshToken,
+            expiresAt: expirationDate
+        });
+        
+        // 3. Establecer la Cookie Segura para la Web
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            path: '/api/auth/refresh-token', // La cookie solo se envía a este endpoint
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
+        });
+
+        // 4. Enviar la Respuesta JSON para la App Mobile
+        const userResponse = user.toJSON();
+        delete userResponse.password;
+        
+        res.json({ 
+            success: true, 
+            accessToken: `Bearer ${accessToken}`, 
+            refreshToken: refreshToken,
+            user: userResponse
+        });
+
+    } catch (error) {
+        console.error(`[Auth-Service /login] ERROR:`, error);
+        res.status(500).json({ success: false, message: 'Error interno del servidor.' });
+    }
+});
 
 // --- Rutas de Autenticación de Dos Factores (2FA) ---
 
