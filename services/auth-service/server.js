@@ -291,32 +291,40 @@ async function sendEmail(to, subject, html) {
 }
 
 const authenticateToken = async (req, res, next) => {
-    // Para la web, el token viene en la cookie. Para la mobile, en la cabecera.
+    // Usamos el logger profesional
+    logger.info(`[Auth-Token] Iniciando validación para la ruta: ${req.originalUrl}`);
+
+    // Log para ver las cookies que llegan
+    logger.info({ message: "[Auth-Token] Cookies recibidas por el servicio:", cookies: req.cookies });
+
     const tokenFromHeader = req.headers['authorization']?.split(' ')[1];
     const token = tokenFromHeader || req.cookies.accessToken;
 
     if (!token) {
+        logger.warn(`[Auth-Token] ACCESO DENEGADO: No se encontró token ni en la cabecera ni en las cookies.`);
         return res.status(401).json({ success: false, message: 'Token de acceso no proporcionado.' });
     }
 
+    logger.info(`[Auth-Token] Token encontrado. Intentando verificar...`);
     try {
-        // Intenta verificar el token. Si ha expirado, jwt.verify lanzará un error.
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = decoded;
+        logger.info(`[Auth-Token] ÉXITO: Token verificado para el usuario ${decoded.id}`);
         return next();
     } catch (err) {
-        // Si el error es específicamente porque el token expiró, enviamos un mensaje claro.
+        logger.error(`[Auth-Token] ERROR: La verificación del token falló.`, { errorName: err.name, errorMessage: err.message });
+        
         if (err.name === 'TokenExpiredError') {
-            // El interceptor de Axios en el frontend usará este mensaje para intentar refrescar el token.
             return res.status(401).json({ 
                 success: false, 
                 message: 'Token de acceso expirado.' 
             });
         }
-        // Para cualquier otro error (malformado, firma inválida)
+
         return res.status(403).json({ success: false, message: 'Token de acceso inválido.' });
     }
 };
+
 // --- Middleware de Auditoría ---
 const auditTrail = (action) => async (req, res, next) => {
     // Se ejecuta después de que la ruta principal ha terminado
