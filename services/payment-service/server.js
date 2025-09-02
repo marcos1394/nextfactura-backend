@@ -56,43 +56,7 @@ async function sendEmail(to, subject, html) {
  * Crea los planes por defecto en la base de datos si no existen.
  * Esta función se llama al iniciar el servidor.
  */
-async function seedPlans() {
-    const plansToSeed = [
-        {
-            name: 'Básico',
-            price: 199.00,
-            features: { reports: true, users: 1, pos_sync: true },
-            isActive: true
-        },
-        {
-            name: 'Profesional',
-            price: 399.00,
-            features: { reports: true, users: 5, pos_sync: true, custom_branding: true },
-            isActive: true
-        },
-        {
-            name: 'Corporativo',
-            price: 799.00,
-            features: { reports: true, users: 'unlimited', pos_sync: true, custom_branding: true, api_access: true },
-            isActive: true
-        }
-    ];
 
-    try {
-        for (const planData of plansToSeed) {
-            const [plan, created] = await Plan.findOrCreate({
-                where: { name: planData.name },
-                defaults: planData
-            });
-            if (created) {
-                console.log(`[Seed] Plan "${plan.name}" creado.`);
-            }
-        }
-        console.log('[Seed] Verificación de planes completada.');
-    } catch (error) {
-        console.error('[Seed] Error al crear los planes por defecto:', error);
-    }
-}
 
 // --- Conexión a Base de Datos ---
 const sequelize = new Sequelize(process.env.DATABASE_URL, {
@@ -108,22 +72,30 @@ const User = sequelize.define('User', {
     id: { type: DataTypes.UUID, primaryKey: true },
 }, { tableName: 'users', timestamps: false });
 
+// En services/payment-service/server.js
+
 const Plan = sequelize.define('Plan', {
     id: { type: DataTypes.UUID, defaultValue: UUIDV4, primaryKey: true },
     name: { type: DataTypes.STRING, allowNull: false, unique: true },
-    price: { type: DataTypes.FLOAT, allowNull: false },
+    timbres: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     
-    // --- CAMPO AÑADIDO ---
-    timbres: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-        defaultValue: 0 // Ej. Plan Básico: 100, Plan Pro: 500
-    },
-
-    features: { type: DataTypes.JSONB, allowNull: true },
-    mercadopagoId: { type: DataTypes.STRING, allowNull: true },
+    // --- Campos de Precio Detallados ---
+    price_monthly: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
+    price_annually: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
+    
+    // --- Campos de UI ---
+    tagline: { type: DataTypes.STRING }, // Ej. 'Recomendado', 'Esencial'
+    description: { type: DataTypes.TEXT },
+    features: { type: DataTypes.JSONB }, // Ej. [{ "text": "Facturación automática", "icon": "receipt" }]
+    isHighlighted: { type: DataTypes.BOOLEAN, defaultValue: false },
+    
+    // --- IDs de Mercado Pago por Ciclo ---
+    mercadopagoId_monthly: { type: DataTypes.STRING },
+    mercadopagoId_annually: { type: DataTypes.STRING },
+    
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true }
 }, { tableName: 'plans', timestamps: true });
+// En services/payment-service/server.js
 
 const PlanPurchase = sequelize.define('PlanPurchase', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -216,11 +188,13 @@ app.get('/subscription-check', authenticateToken, async (req, res) => {
     }
 });
 
-
 // GET /plans - Endpoint público para listar los planes disponibles
 app.get('/plans', async (req, res) => {
     try {
-        const plans = await Plan.findAll({ where: { isActive: true } });
+        const plans = await Plan.findAll({ 
+            where: { isActive: true },
+            order: [['price_annually', 'ASC']] // Ordena los planes del más barato al más caro
+        });
         res.status(200).json({ success: true, plans });
     } catch (error) {
         console.error('[Payment-Service /plans] Error:', error);
