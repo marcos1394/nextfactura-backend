@@ -255,6 +255,45 @@ const purchase = await PlanPurchase.create({
     }
 });
 
+app.get('/purchase-status/:purchaseId', authenticateToken, async (req, res) => {
+    const { purchaseId } = req.params;
+    const userId = req.user.id;
+    const logPrefix = `[Payment /purchase-status]`;
+
+    logger.info(`${logPrefix} Solicitud para verificar estado de compra ${purchaseId} por usuario ${userId}`);
+
+    try {
+        // 1. Buscamos la compra en la base de datos.
+        // Se añade la condición 'userId' para asegurar que un usuario solo pueda consultar SUS propias compras.
+        const purchase = await PlanPurchase.findOne({
+            where: {
+                id: purchaseId,
+                userId: userId 
+            }
+        });
+
+        // 2. Si no se encuentra, es porque el ID es incorrecto o no le pertenece al usuario.
+        if (!purchase) {
+            logger.warn(`${logPrefix} Compra ${purchaseId} no encontrada o no pertenece al usuario ${userId}.`);
+            return res.status(404).json({ success: false, message: 'Registro de compra no encontrado.' });
+        }
+
+        // 3. Si se encuentra, devolvemos únicamente el estado actual.
+        logger.info(`${logPrefix} Compra ${purchaseId} encontrada. Estado actual: ${purchase.status}.`);
+        res.status(200).json({
+            success: true,
+            status: purchase.status // Ej: 'pending_payment', 'active', 'rejected'
+        });
+
+    } catch (error) {
+        logger.error(`${logPrefix} Error al consultar la compra ${purchaseId}:`, { 
+            error: error.message, 
+            stack: error.stack 
+        });
+        res.status(500).json({ success: false, message: 'Error interno al verificar el estado de la compra.' });
+    }
+});
+
 // En services/payment-service/server.js
 
 app.post('/webhook/mercadopago', async (req, res) => {
