@@ -2,7 +2,7 @@
 # 		  docker-compose.yml para Backend de NextFactura
 # Arquitectura Robusta con Healthchecks y Dependencias Condicionales
 # ===================================================================
-version: '3.8'
+# La directiva 'version' ya no es necesaria en las versiones modernas de Compose.
 
 services:
 
@@ -36,25 +36,25 @@ services:
       timeout: 5s
       retries: 3
 
-  # --- API Gateway ---
+  # --- API Gateway (Punto de Entrada Único) ---
   api-gateway:
     build: ./api-gateway
     restart: on-failure
     env_file: [".env"]
     ports:
-      # El único servicio que expone un puerto HTTP/S al Nginx del host.
-      - "4000:8080"
+      - "4000:8080" # El único puerto expuesto a Nginx en el host
     depends_on:
       - auth-service
       - restaurant-service
       - payment-service
       - pos-service
       - pac-service
-      - connector-service # Agregamos dependencia al nuevo servicio
+      - connector-service
+      - notification-service # <-- DEPENDENCIA AÑADIDA
     networks:
       - app-net
   
-  # --- Microservicios con Dependencias Saludables ---
+  # --- Microservicios de la Aplicación ---
   auth-service:
     build: ./services/auth-service
     restart: on-failure
@@ -77,7 +77,7 @@ services:
     networks:
       - app-net
     volumes:
-      # Antes apuntaba a /downloads, ahora apunta a la ruta que el código usa.
+      # Volumen para los archivos fiscales (CSD) y logos
       - /home/servidor/secure_uploads:/app/secure_uploads
 
   payment-service:
@@ -99,7 +99,6 @@ services:
         condition: service_healthy
       restaurant-service:
         condition: service_started
-      # --- CAMBIO CLAVE 2: El pos-service ahora espera al connector-service ---
       connector-service:
         condition: service_started
     networks:
@@ -117,17 +116,24 @@ services:
     networks:
       - app-net
       
-  # --- CAMBIO CLAVE 1: NUEVO SERVICIO CONECTOR ---
   connector-service:
     build: ./services/connector-service
     restart: on-failure
     env_file: [".env"]
     ports:
-      # Puerto público para que los agentes instalados en los restaurantes se conecten.
+      # Puerto público para los agentes de escritorio
       - "4006:4006"
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - app-net
+
+  # --- NUEVO SERVICIO DE NOTIFICACIONES ---
+  notification-service:
+    build: ./services/notification-service
+    restart: on-failure
+    env_file: [".env"]
     networks:
       - app-net
       
