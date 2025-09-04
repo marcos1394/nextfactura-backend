@@ -115,6 +115,15 @@ const User = sequelize.define('User', {
     magicLinkExpires: {
         type: DataTypes.DATE,
         allowNull: true
+    },
+    notificationPreferences: {
+        type: DataTypes.JSONB,
+        defaultValue: {
+            salesAlerts: true,
+            weeklySummary: true,
+            promotions: false,
+            reminders: true,
+        }
     }
 }, { 
     tableName: 'users', 
@@ -514,6 +523,39 @@ app.post('/refresh-token', async (req, res) => {
         return res.status(403).json({ success: false, message: 'Token de refresco inválido o expirado.' });
     }
 });
+
+// GET /notifications/settings - Obtener las preferencias del usuario logueado
+app.get('/notifications/settings', authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findByPk(req.user.id, {
+            attributes: ['notificationPreferences']
+        });
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });
+        }
+        res.status(200).json({ success: true, settings: user.notificationPreferences });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al obtener las preferencias.' });
+    }
+});
+
+// PUT /notifications/settings - Actualizar las preferencias del usuario logueado
+app.put('/notifications/settings', authenticateToken, async (req, res) => {
+    const newSettings = req.body;
+    try {
+        const [updatedCount] = await User.update(
+            { notificationPreferences: newSettings },
+            { where: { id: req.user.id } }
+        );
+        if (updatedCount === 0) {
+            return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });
+        }
+        res.status(200).json({ success: true, message: 'Preferencias actualizadas.' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al actualizar las preferencias.' });
+    }
+});
+
 // --- Rutas para Social Login ---
 // GET /auth/google - Redirige al usuario a Google para autenticarse
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
