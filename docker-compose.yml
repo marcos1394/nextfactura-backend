@@ -2,11 +2,10 @@
 # 		  docker-compose.yml para Backend de NextFactura
 # Arquitectura Robusta con Healthchecks y Dependencias Condicionales
 # ===================================================================
-# La directiva 'version' ya no es necesaria en las versiones modernas de Compose.
 
 services:
 
-  # --- Base de Datos PostgreSQL con Healthcheck ---
+  # --- Base de Datos PostgreSQL ---
   postgres:
     image: postgres:15-alpine
     restart: always
@@ -24,7 +23,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- Cache con Redis y Healthcheck ---
+  # --- Cache con Redis ---
   redis:
     image: redis:alpine
     restart: always
@@ -42,7 +41,7 @@ services:
     restart: on-failure
     env_file: [".env"]
     ports:
-      - "4000:8080" # El único puerto expuesto a Nginx en el host
+      - "4000:8080"
     depends_on:
       - auth-service
       - restaurant-service
@@ -50,7 +49,8 @@ services:
       - pos-service
       - pac-service
       - connector-service
-      - notification-service # <-- DEPENDENCIA AÑADIDA
+      - notification-service
+      - content-service # <-- DEPENDENCIA AÑADIDA
     networks:
       - app-net
   
@@ -77,7 +77,6 @@ services:
     networks:
       - app-net
     volumes:
-      # Volumen para los archivos fiscales (CSD) y logos
       - /home/servidor/secure_uploads:/app/secure_uploads
 
   payment-service:
@@ -111,8 +110,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      restaurant-service:
-        condition: service_started
     networks:
       - app-net
       
@@ -121,7 +118,6 @@ services:
     restart: on-failure
     env_file: [".env"]
     ports:
-      # Puerto público para los agentes de escritorio
       - "4006:4006"
     depends_on:
       postgres:
@@ -129,11 +125,21 @@ services:
     networks:
       - app-net
 
-  # --- NUEVO SERVICIO DE NOTIFICACIONES ---
   notification-service:
     build: ./services/notification-service
     restart: on-failure
     env_file: [".env"]
+    networks:
+      - app-net
+
+  # --- NUEVO SERVICIO DE CONTENIDO ---
+  content-service:
+    build: ./services/content-service
+    restart: on-failure
+    env_file: [".env"]
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - app-net
       

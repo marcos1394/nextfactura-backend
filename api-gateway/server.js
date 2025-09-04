@@ -17,6 +17,7 @@ const PAC_SERVICE_URL = process.env.PAC_SERVICE_URL || 'http://pac-service:4005'
 const POS_SERVICE_URL = process.env.POS_SERVICE_URL || 'http://pos-service:4004';
 const CONNECTOR_SERVICE_URL = process.env.CONNECTOR_SERVICE_URL || 'http://connector-service:4006'; // <-- NUEVA VARIABLE
 const NOTIFICATION_SERVICE_URL = process.env.NOTIFICATION_SERVICE_URL || 'http://notification-service:4007'; // <-- SERVICIO AÑADIDO
+const CONTENT_SERVICE_URL = process.env.CONTENT_SERVICE_URL || 'http://content-service:4008'; // <-- SERVICIO AÑADIDO
 
 console.log('API Gateway (vProfesional) iniciando...');
 
@@ -62,6 +63,8 @@ const services = [
     { route: '/pos', target: POS_SERVICE_URL },
     { route: '/connector', target: CONNECTOR_SERVICE_URL }, // <-- NUEVA RUTA PARA EL CONECTOR
     { route: '/notifications', target: NOTIFICATION_SERVICE_URL }, // <-- REGLA AÑADIDA
+    { route: '/content', target: CONTENT_SERVICE_URL }, // <-- REGLA AÑADIDA
+
 
 ];
 
