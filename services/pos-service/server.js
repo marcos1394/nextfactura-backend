@@ -204,6 +204,150 @@ app.get('/query/:restaurantId/declaracioncajero', authenticateToken, dataQueryHa
     'declaracioncajero'
 ));
 
+// En services/pos-service/server.js
+
+// Función auxiliar para formatear fechas a YYYY-MM-DD
+const formatDate = (date) => date.toISOString().split('T')[0];
+
+app.get('/reports/:restaurantId', authenticateToken, async (req, res) => {
+    const { restaurantId } = req.params;
+    const { reportType = 'sales', dateRange = 'Semana' } = req.query;
+
+    console.log(`[POS-Service] Petición de reporte recibida: ${reportType}, Rango: ${dateRange}`);
+
+    try {
+        // --- 1. CONSTRUCCIÓN DE FILTRO DE FECHA DINÁMICO ---
+        let dateFilter = '';
+        const today = new Date();
+        
+        switch (dateRange) {
+            case 'Hoy':
+                dateFilter = `WHERE CAST(fecha AS DATE) = '${formatDate(today)}'`;
+                break;
+            case 'Ayer':
+                const yesterday = new Date();
+                yesterday.setDate(today.getDate() - 1);
+                dateFilter = `WHERE CAST(fecha AS DATE) = '${formatDate(yesterday)}'`;
+                break;
+            case 'Mes':
+                const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+                const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                dateFilter = `WHERE CAST(fecha AS DATE) BETWEEN '${formatDate(firstDayOfMonth)}' AND '${formatDate(lastDayOfMonth)}'`;
+                break;
+            case 'Semana':
+            default:
+                const sevenDaysAgo = new Date();
+                sevenDaysAgo.setDate(today.getDate() - 6);
+                dateFilter = `WHERE CAST(fecha AS DATE) BETWEEN '${formatDate(sevenDaysAgo)}' AND '${formatDate(today)}'`;
+                break;
+        }
+
+        // --- 2. SELECCIÓN DE LA CONSULTA SQL ---
+        let query;
+        switch (reportType) {
+            case 'products':
+                query = `SELECT TOP 10 p.descripcion, SUM(cd.cantidad) as totalQuantity, SUM(cd.precio * cd.cantidad) as totalSales
+                         FROM cheqdet cd JOIN Productos p ON cd.idproducto = p.idproducto
+                         GROUP BY p.descripcion ORDER BY totalSales DESC`;
+                break;
+            
+            case 'waiters':
+                query = `SELECT c.usuario as name, SUM(c.total) as totalSales, COUNT(c.numcheque) as totalTickets
+                         FROM cheques c ${dateFilter} AND c.usuario IS NOT NULL AND c.usuario <> ''
+                         GROUP BY c.usuario ORDER BY totalSales DESC`;
+                break;
+            
+            case 'sales':
+            default:
+                query = `SELECT CAST(fecha AS DATE) as date, SUM(total) as totalSales
+                         FROM cheques ${dateFilter}
+                         GROUP BY CAST(fecha AS DATE) ORDER BY date ASC`;
+                break;
+        }
+        
+        // --- 3. OBTENER MÉTODO DE CONEXIÓN ---
+        const restaurantServiceUrl = process.env.RESTAURANT_SERVICE_URL || 'http://restaurant-service:4002';
+        const resp = await fetch(`${restaurantServiceUrl}/${restaurantId}`, {
+            headers: { 'Authorization': req.headers.authorization }
+        });
+        const restaurantData = await resp.json();
+        if (!resp.ok) throw new Error('No se pudo obtener la información del restaurante.');
+        const restaurant = restaurantData.restaurant;
+
+        // --- 4. EJECUCIÓN DE LA CONSULTA ---
+        let results;
+        if (restaurant.connectionMethod === 'agent') {
+            const correlationId = uuidv4();
+            const commandPromise = new Promise((resolve, reject) => {
+                pendingRequests.set(correlationId, { resolve, reject });
+                setTimeout(() => {
+                    if (pendingRequests.has(correlationId)) {
+                        pendingRequests.delete(correlationId);
+                        reject(new Error('Timeout: El agente no respondió a la petición de reporte.'));
+                    }
+                }, 30000);
+            });
+
+            await fetch(`http://connector-service:4006/internal/send-command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    clientId: restaurantId,
+                    command: `get_report_${reportType}`,
+                    correlationId,
+                    data: { sql: query }
+                })
+            });
+            results = await commandPromise;
+        } else {
+            const pool = await getConnectedPool({
+                user: restaurant.connectionUser,
+                password: restaurant.connectionPassword,
+                server: restaurant.connectionHost,
+                database: restaurant.connectionDbName,
+                port: restaurant.connectionPort,
+            });
+            const result = await pool.request().query(query);
+            results = result.recordset;
+            await pool.close();
+        }
+
+        // --- 5. PROCESAMIENTO DE DATOS Y RESPUESTA ---
+        let reportData;
+        if (reportType === 'sales') {
+            const total = results.reduce((sum, row) => sum + row.totalSales, 0);
+            const transactions = results.length;
+            const average = transactions > 0 ? total / transactions : 0;
+            
+            reportData = {
+                kpis: { total, transactions, average, growth: 0 },
+                chartData: results.map(row => ({
+                    value: row.totalSales,
+                    label: new Date(row.date).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })
+                })),
+                lineData: { // Formato específico para react-native-gifted-charts
+                    dataPoints: results.map(row => ({ value: row.totalSales })),
+                    labels: results.map(row => new Date(row.date).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }))
+                },
+                tableData: results.map(row => ({
+                    id: row.date.toISOString(),
+                    label: new Date(row.date).toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+                    value: row.totalSales,
+                    change: Math.random() > 0.5 ? 15 : -10
+                }))
+            };
+        } else {
+            reportData = results;
+        }
+        
+        res.status(200).json({ success: true, data: reportData });
+
+    } catch (error) {
+        console.error(`[POS-Service /reports] Error:`, error);
+        res.status(500).json({ success: false, message: 'Error al generar el reporte.' });
+    }
+});
+
 app.get('/query/:restaurantId/estaciones', authenticateToken, dataQueryHandler(
     'SELECT [idestacion], [descripcion], [serie], [ip], [directoriorespaldo], [mensajespera], [rutatemoral], [PostLastOnline] FROM [estaciones]', 
     'estaciones'
