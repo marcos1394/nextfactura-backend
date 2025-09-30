@@ -284,6 +284,15 @@ const authenticateToken = (req, res, next) => {
     }
 };
 
+// Middleware de autenticación interna
+const authenticateService = (req, res, next) => {
+    const secretKey = req.headers['x-internal-secret'];
+    if (!secretKey || secretKey !== process.env.INTERNAL_SECRET_KEY) {
+        return res.status(403).json({ success: false, message: 'Acceso no autorizado.' });
+    }
+    next();
+};
+
 // --- FUNCIÓN AUXILIAR CORREGIDA ---
 async function getFileAsBase64(fileUrl) {
     try {
@@ -478,6 +487,19 @@ app.post('/',
         }
     }
 );
+
+// Endpoint interno para que otros servicios obtengan datos de un restaurante
+app.get('/internal/data/:restaurantId', authenticateService, async (req, res) => {
+    try {
+        const restaurant = await Restaurant.findByPk(req.params.restaurantId);
+        if (!restaurant) {
+            return res.status(404).json({ success: false, message: 'Restaurante no encontrado.' });
+        }
+        res.status(200).json({ success: true, restaurant });
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error interno.' });
+    }
+});
 
 // --- ENDPOINT: ACTUALIZAR RESTAURANTE ---
 app.put('/:id', 

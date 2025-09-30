@@ -101,41 +101,40 @@ const authenticateToken = async (req, res, next) => {
     }
 };
 
-// --- HANDLER DE RUTAS MEJORADO ---
+// En services/pos-service/server.js
+
 const dataQueryHandler = (query, queryType) => async (req, res) => {
     const { restaurantId } = req.params;
     
     try {
-        // 1. Obtener datos de conexión y método desde el restaurant-service
+        // 1. Obtener datos de conexión usando la clave secreta interna
         const restaurantServiceUrl = process.env.RESTAURANT_SERVICE_URL || 'http://restaurant-service:4002';
-        const resp = await fetch(`${restaurantServiceUrl}/${restaurantId}`, {
-            headers: { 'Authorization': req.headers.authorization }
+        
+        // --- CAMBIO CLAVE ---
+        // Llamamos a un nuevo endpoint interno y nos autenticamos como servicio, no como usuario.
+        const resp = await fetch(`${restaurantServiceUrl}/internal/data/${restaurantId}`, {
+            headers: { 'X-Internal-Secret': process.env.INTERNAL_SECRET_KEY }
         });
         const restaurantData = await resp.json();
 
         if (!resp.ok || !restaurantData.success) {
             throw new Error('No se pudo obtener la información del restaurante o no está autorizado.');
         }
-
         const restaurant = restaurantData.restaurant;
 
-        // 2. DECIDIR LA ESTRATEGIA: AGENTE O CONEXIÓN DIRECTA
+        // 2. DECIDIR LA ESTRATEGIA: AGENTE O CONEXIÓN DIRECTA (Sin cambios)
         if (restaurant.connectionMethod === 'agent') {
-            // --- ESTRATEGIA CON AGENTE (NUEVA) ---
-            console.log(`[POS-Service] Usando AGENTE para restaurante ${restaurantId}`);
             const correlationId = uuidv4();
-
             const commandPromise = new Promise((resolve, reject) => {
                 pendingRequests.set(correlationId, { resolve, reject });
                 setTimeout(() => {
                     if (pendingRequests.has(correlationId)) {
                         pendingRequests.delete(correlationId);
-                        reject(new Error('Timeout: El agente no respondió en 30 segundos.'));
+                        reject(new Error('Timeout: El agente no respondió.'));
                     }
                 }, 30000);
             });
 
-            // Enviar comando al connector-service
             await fetch(`http://connector-service:4006/internal/send-command`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -143,7 +142,7 @@ const dataQueryHandler = (query, queryType) => async (req, res) => {
                     clientId: restaurantId,
                     command: `get_${queryType}`,
                     correlationId: correlationId,
-                    data: { sql: query } // Enviamos la consulta SQL al agente
+                    data: { sql: query }
                 })
             });
 
@@ -151,18 +150,16 @@ const dataQueryHandler = (query, queryType) => async (req, res) => {
             res.status(200).json({ success: true, data: agentData });
 
         } else {
-            // --- ESTRATEGIA DE CONEXIÓN DIRECTA (ANTIGUA) ---
-            console.log(`[POS-Service] Usando CONEXIÓN DIRECTA para restaurante ${restaurantId}`);
+            // --- ESTRATEGIA DE CONEXIÓN DIRECTA (Sin cambios) ---
             let pool;
             try {
-                const config = { 
-                    host: restaurant.connectionHost, 
-                    port: restaurant.connectionPort, 
-                    user: restaurant.connectionUser, 
-                    password: restaurant.connectionPassword, 
-                    database: restaurant.connectionDbName 
-                };
-                pool = await getConnectedPool(config);
+                pool = await getConnectedPool({
+                    host: restaurant.connectionHost,
+                    port: restaurant.connectionPort,
+                    user: restaurant.connectionUser,
+                    password: restaurant.connectionPassword,
+                    database: restaurant.connectionDbName
+                });
                 const result = await pool.request().query(query);
                 res.status(200).json({ success: true, data: result.recordset });
             } finally {
@@ -175,7 +172,6 @@ const dataQueryHandler = (query, queryType) => async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
-
 // Endpoint de salud para Docker
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok' });
