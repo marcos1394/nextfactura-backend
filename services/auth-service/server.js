@@ -613,8 +613,8 @@ app.post('/login', async (req, res) => {
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
             secure: true, // Forzamos a que siempre sea segura, ya que usas HTTPS
-            sameSite: 'None',
-            path: '/api/auth/refresh-token', // La cookie solo se envía a este endpoint
+            sameSite: 'lax',
+            path:'/', // La cookie solo se envía a este endpoint
             maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
         });
 
