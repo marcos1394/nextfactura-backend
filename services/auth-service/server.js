@@ -307,7 +307,7 @@ const authenticateToken = async (req, res, next) => {
     logger.info({ message: "[Auth-Token] Cookies recibidas por el servicio:", cookies: req.cookies });
 
     const tokenFromHeader = req.headers['authorization']?.split(' ')[1];
-    const token = tokenFromHeader || req.cookies.accessToken;
+    const token = tokenFromHeader || req.cookies.accessToken?.split(' ')[1];
 
     if (!token) {
         logger.warn(`[Auth-Token] ACCESO DENEGADO: No se encontró token ni en la cabecera ni en las cookies.`);
@@ -608,6 +608,16 @@ app.post('/login', async (req, res) => {
             token: hashedRefreshToken,
             expiresAt: expirationDate
         });
+
+        // 3. Establecer las Cookies Seguras para la Web
+res.cookie('accessToken', `Bearer ${accessToken}`, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'lax',
+    path: '/', // Path general para que se envíe a TODOS los endpoints de /api
+    maxAge: 15 * 60 * 1000 // 15 minutos
+});
+
         
         // 3. Establecer la Cookie Segura para la Web
         res.cookie('refreshToken', refreshToken, {
@@ -617,6 +627,8 @@ app.post('/login', async (req, res) => {
             path:'/', // La cookie solo se envía a este endpoint
             maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
         });
+
+
 
         // 4. Enviar la Respuesta JSON para la App Mobile
         const userResponse = user.toJSON();
