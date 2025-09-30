@@ -8,6 +8,8 @@ const jwt = require('jsonwebtoken');
 const sql = require('mssql');
 const { createClient } = require('redis'); // Para escuchar respuestas
 const { v4: uuidv4 } = require('uuid'); // Para IDs únicos de petición
+const logger = require('./logger'); // Importa tu nuevo logger
+
 
 const app = express();
 app.use(cors());
