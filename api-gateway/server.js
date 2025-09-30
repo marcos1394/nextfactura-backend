@@ -1,4 +1,3 @@
-// No es necesario require('dotenv').config() cuando se usa Docker Compose con env_file
 const express = require('express');
 const cors = require('cors');
 const { createProxyMiddleware } = require('http-proxy-middleware');
@@ -28,18 +27,19 @@ const createProxyOptions = (targetUrl, routePrefix) => ({
     pathRewrite: {
         [`^/api${routePrefix}`]: '', // Reescribe /api/auth -> /
     },
+    
+    // --- LÍNEA CLAVE FINAL ---
+    // Esto soluciona el problema de las cookies que no se guardan en el navegador
+    // al estar detrás de múltiples proxies. Elimina el dominio de la cookie
+    // para que el navegador la asocie con el dominio que está visitando.
+    cookieDomainRewrite: "",
+
     on: {
         proxyReq: (proxyReq, req, res) => {
-            // --- LOGGING DETALLADO DE CABECERAS ---
             console.log(`[Proxy -> Service] Redirigiendo ${req.method} ${req.originalUrl} a ${targetUrl}${proxyReq.path}`);
-            
-            // Log para la cabecera Authorization (usada por la app mobile)
-            console.log('[Proxy -> Service] Cabecera Authorization:', req.headers['authorization'] || 'No presente');
-            
-            // Log para la cabecera Cookie (usada por la app web)
             console.log('[Proxy -> Service] Cabecera Cookie:', req.headers['cookie'] || 'No presente');
             
-            // Reenviamos la cabecera de autorización si existe
+            // Reenviamos la cabecera de autorización (para la app mobile)
             if (req.headers.authorization) {
                 proxyReq.setHeader('authorization', req.headers.authorization);
             }
