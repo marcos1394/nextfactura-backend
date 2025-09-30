@@ -9,11 +9,15 @@ const sql = require('mssql');
 const { createClient } = require('redis'); // Para escuchar respuestas
 const { v4: uuidv4 } = require('uuid'); // Para IDs únicos de petición
 const logger = require('./logger'); // Importa tu nuevo logger
+const cookieParser = require('cookie-parser'); // <-- AÑADE ESTA IMPORTACIÓN
+
 
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser()); // <-- AÑADE ESTA LÍNEA
+
 
 // --- CONFIGURACIÓN DE REDIS (PARA ESCUCHAR RESPUESTAS DEL AGENTE) ---
 const redisClient = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
