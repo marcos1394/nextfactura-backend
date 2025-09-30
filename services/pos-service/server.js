@@ -60,16 +60,38 @@ async function getConnectedPool(connectionConfig) {
     }
 }
 
-// --- MIDDLEWARE DE AUTENTICACIÓN (SIN CAMBIOS) ---
-const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    if (!token) return res.status(401).json({ success: false, message: 'Token no proporcionado.' });
+const authenticateToken = async (req, res, next) => {
+    // Usamos el logger profesional
+    logger.info(`[Auth-Token] Iniciando validación para la ruta: ${req.originalUrl}`);
+
+    // Log para ver las cookies que llegan
+    logger.info({ message: "[Auth-Token] Cookies recibidas por el servicio:", cookies: req.cookies });
+
+    const tokenFromHeader = req.headers['authorization']?.split(' ')[1];
+    const token = tokenFromHeader || req.cookies.accessToken?.split(' ')[1];
+
+    if (!token) {
+        logger.warn(`[Auth-Token] ACCESO DENEGADO: No se encontró token ni en la cabecera ni en las cookies.`);
+        return res.status(401).json({ success: false, message: 'Token de acceso no proporcionado.' });
+    }
+
+    logger.info(`[Auth-Token] Token encontrado. Intentando verificar...`);
     try {
-        req.user = jwt.verify(token, process.env.JWT_SECRET);
-        next();
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.user = decoded;
+        logger.info(`[Auth-Token] ÉXITO: Token verificado para el usuario ${decoded.id}`);
+        return next();
     } catch (err) {
-        res.status(403).json({ success: false, message: 'Token inválido.' });
+        logger.error(`[Auth-Token] ERROR: La verificación del token falló.`, { errorName: err.name, errorMessage: err.message });
+        
+        if (err.name === 'TokenExpiredError') {
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Token de acceso expirado.' 
+            });
+        }
+
+        return res.status(403).json({ success: false, message: 'Token de acceso inválido.' });
     }
 };
 
