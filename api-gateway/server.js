@@ -3,7 +3,11 @@ const cors = require('cors');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
 const app = express();
-app.use(cors());
+// --- Middlewares estándar ---
+app.use(cors({
+    origin: 'https://www.nextmanager.com.mx', // Solo permite peticiones desde tu frontend
+    credentials: true                         // ¡CRÍTICO! Permite el intercambio de cookies
+}));
 
 // --- URLs de los microservicios ---
 const AUTH_SERVICE_URL = process.env.AUTH_SERVICE_URL;
