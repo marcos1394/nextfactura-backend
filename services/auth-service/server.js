@@ -362,19 +362,89 @@ app.post('/test-crash', (req, res) => {
 });
 
 // POST /register
+// En services/auth-service/server.js
+
 app.post('/register', async (req, res) => {
     const { name, email, password, restaurantName } = req.body;
-    if (!email || !password) return res.status(400).json({ success: false, message: 'Email y contraseña son requeridos.' });
+    if (!email || !password || !name || !restaurantName) {
+        return res.status(400).json({ success: false, message: 'Todos los campos son requeridos.' });
+    }
     
+    // Iniciamos una transacción para asegurar la integridad de los datos
+    const transaction = await sequelize.transaction();
+
     try {
+        // 1. Crear el usuario
         const hashedPassword = await bcrypt.hash(password, 10);
-        const user = await User.create({ name, email: email.toLowerCase(), password: hashedPassword, restaurantName });
+        const user = await User.create({
+            name,
+            email: email.toLowerCase(),
+            password: hashedPassword,
+            restaurantName
+        }, { transaction });
         
-        const welcomeHtml = `<h1>¡Bienvenido a NextManager, ${name || 'usuario'}!</h1><p>Tu cuenta ha sido creada exitosamente. Ya puedes iniciar sesión.</p>`;
+        // --- INICIO DE LA LÓGICA DE AUTO-LOGIN ---
+
+        // 2. Generar Tokens (igual que en /login)
+        const accessToken = jwt.sign(
+            { id: user.id, role: user.role },
+            process.env.JWT_SECRET,
+            { expiresIn: '15m' }
+        );
+        const refreshToken = jwt.sign(
+            { id: user.id },
+            process.env.JWT_REFRESH_SECRET,
+            { expiresIn: '7d' }
+        );
+
+        // 3. Hashear y Guardar el Refresh Token en la Base de Datos
+        const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
+        await RefreshToken.create({
+            userId: user.id,
+            token: hashedRefreshToken,
+            expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 días
+        }, { transaction });
+        
+        // 4. Establecer las Cookies Seguras para la Web
+        res.cookie('accessToken', `Bearer ${accessToken}`, {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'lax',
+            path: '/',
+            maxAge: 15 * 60 * 1000 // 15 minutos
+        });
+        res.cookie('refreshToken', refreshToken, {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'lax',
+            path: '/api/auth/refresh-token',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
+        });
+
+        // --- FIN DE LA LÓGICA DE AUTO-LOGIN ---
+
+        // Si todo sale bien, confirmamos la transacción en la base de datos
+        await transaction.commit();
+
+        // 5. Enviar correo de bienvenida (de forma asíncrona)
+        const welcomeHtml = `<h1>¡Bienvenido a NextManager, ${name}!</h1><p>Tu cuenta ha sido creada exitosamente. Ya puedes continuar con la configuración de tu plan.</p>`;
         sendEmail(user.email, '¡Bienvenido a NextManager!', welcomeHtml).catch(console.error);
 
-        res.status(201).json({ success: true, message: 'Usuario registrado con éxito.', userId: user.id });
+        const userResponse = user.toJSON();
+        delete userResponse.password;
+
+        // 6. Devolver respuesta exitosa (código 201: Creado)
+        res.status(201).json({ 
+            success: true, 
+            message: 'Usuario registrado y sesión iniciada.',
+            accessToken: `Bearer ${accessToken}`, // Para la app mobile
+            user: userResponse 
+        });
+
     } catch (error) {
+        // Si algo falla, revertimos todos los cambios en la base de datos
+        await transaction.rollback();
+        
         if (error.name === 'SequelizeUniqueConstraintError') {
             return res.status(409).json({ success: false, message: 'El correo electrónico ya está en uso.' });
         }
