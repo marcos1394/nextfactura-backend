@@ -7,6 +7,7 @@ const logger = require('./logger'); // Importa tu nuevo logger
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 
 const { Sequelize, DataTypes, UUIDV4 } = require('sequelize');
 const { MercadoPagoConfig, Preference, Payment } = require('mercadopago');
