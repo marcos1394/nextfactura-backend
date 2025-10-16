@@ -774,6 +774,8 @@ app.post('/2fa/validate', async (req, res) => {
 });
 
 // --- ENDPOINT FINAL: OBTENER TODOS LOS DATOS DE LA CUENTA ---
+// En services/auth-service/server.js
+
 app.get('/account-details', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
@@ -805,6 +807,7 @@ app.get('/account-details', authenticateToken, async (req, res) => {
         // 3. Construimos el objeto de respuesta final y completo
         const accountData = {
             profile: {
+                id: user.id, // <-- ¡LA LÍNEA QUE FALTABA!
                 name: user.name,
                 email: user.email,
                 avatarUrl: user.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`,
@@ -814,13 +817,15 @@ app.get('/account-details', authenticateToken, async (req, res) => {
                 rfc: fiscalData ? fiscalData.rfc : 'No disponible',
                 fiscalAddress: fiscalData ? fiscalData.fiscalAddress : 'No disponible',
                 paymentMethod: activeSubscription ? activeSubscription.paymentMethod : 'No disponible',
-                nextBillingDate: activeSubscription ? activeSubscription.nextBillingDate : 'No disponible',
+                nextBillingDate: activeSubscription ? activeSubscription.expirationDate : 'No disponible',
             },
             plan: {
                 name: activeSubscription ? activeSubscription.planName : 'Sin Plan Activo',
                 price: activeSubscription ? activeSubscription.price : 0,
                 period: activeSubscription ? activeSubscription.period : 'N/A',
-                usagePercentage: activeSubscription ? activeSubscription.usagePercentage : 0, // Ejemplo
+                usagePercentage: activeSubscription 
+                    ? ((activeSubscription.timbres_used / activeSubscription.timbres_allocated) * 100).toFixed(0) 
+                    : 0,
             },
             restaurants: restaurants || []
         };
