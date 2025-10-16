@@ -8,7 +8,6 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
-
 const { Sequelize, DataTypes, UUIDV4 } = require('sequelize');
 const { MercadoPagoConfig, Preference, Payment } = require('mercadopago');
 const jwt = require('jsonwebtoken');
@@ -228,51 +227,65 @@ app.get('/plans', async (req, res) => {
 
 // POST /create-preference - Ruta protegida para crear una preferencia de pago
 app.post('/create-preference', authenticateToken, async (req, res) => {
-    const { planId, origin } = req.body;
-    const userId = req.user.id;
+    // Obtenemos 'billingCycle' y 'userId' del cuerpo de la petición
+    const { planId, billingCycle, userId, origin } = req.body;
 
-    if (!planId) return res.status(400).json({ success: false, message: 'Se requiere el ID del plan.' });
+    // Validación robusta de los datos de entrada
+    if (!planId || !billingCycle || !userId) {
+        return res.status(400).json({ success: false, message: 'Faltan datos requeridos (planId, billingCycle, userId).' });
+    }
 
     try {
         const plan = await Plan.findByPk(planId);
-        if (!plan) return res.status(404).json({ success: false, message: 'Plan no encontrado.' });
+        if (!plan) {
+            return res.status(404).json({ success: false, message: 'Plan no encontrado.' });
+        }
 
-        // DESPUÉS:
-const purchase = await PlanPurchase.create({
-    userId,
-    planId,
-    price: plan.price,
-    status: 'pending_preference',
-    origin: origin // <--- ¡Añade esta línea!
-});
+        // --- LÓGICA CLAVE: Seleccionar el precio correcto ---
+        const price = billingCycle === 'annually' ? plan.price_annually : plan.price_monthly;
+        const planTitle = `Plan ${plan.name} (${billingCycle === 'annually' ? 'Anual' : 'Mensual'})`;
 
+        // Creamos el registro de la compra en nuestra base de datos ANTES de ir a Mercado Pago
+        const purchase = await PlanPurchase.create({
+            userId,
+            planId,
+            price: price, // Usamos el precio correcto
+            status: 'pending_payment', // El estado inicial es pendiente de pago
+            origin: origin || 'unknown'
+        });
+
+        // Preparamos los datos para la preferencia de Mercado Pago
         const preferenceData = {
             items: [{
                 id: plan.id,
-                title: `Plan ${plan.name} - NextManager`,
+                title: planTitle,
                 quantity: 1,
-                unit_price: plan.price,
+                unit_price: price, // Usamos el precio correcto
                 currency_id: 'MXN'
             }],
             payer: {
-                email: req.user.email // El email viene en el token JWT
+                email: req.user.email
             },
             back_urls: {
-                success: `${process.env.CLIENT_URL_PROD}/payment/success`,
-                failure: `${process.env.CLIENT_URL_PROD}/payment/failure`,
-                pending: `${process.env.CLIENT_URL_PROD}/payment/pending`
+                success: `${process.env.CLIENT_URL_PROD}/payment-success`,
+                failure: `${process.env.CLIENT_URL_PROD}/payment-failure`,
+                pending: `${process.env.CLIENT_URL_PROD}/payment-pending`
             },
             auto_return: 'approved',
-            notification_url: `${process.env.API_GATEWAY_URL}/api/payment/webhook/mercadopago`,
-            external_reference: purchase.id.toString(), // Usamos el ID de la compra para identificarla en el webhook
+            notification_url: `${process.env.API_URL}/payments/webhook/mercadopago`,
+            external_reference: purchase.id.toString(), // Enviamos nuestro ID de compra
         };
 
+        // Creamos la preferencia en Mercado Pago
         const result = await preference.create({ body: preferenceData });
         
+        // Actualizamos nuestro registro de compra con el ID de la preferencia de Mercado Pago
         purchase.preferenceId = result.id;
         await purchase.save();
 
+        console.log(`[Payment] Preferencia ${result.id} creada para la compra ${purchase.id}.`);
         res.status(201).json({ success: true, init_point: result.init_point, preferenceId: result.id });
+
     } catch (error) {
         console.error('[Payment-Service /create-preference] Error:', error);
         res.status(500).json({ success: false, message: 'Error al crear la preferencia de pago.' });
