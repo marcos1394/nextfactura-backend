@@ -395,7 +395,6 @@ app.post('/',
                 });
             }
 
-            // --- CAMBIO 1: Añadir validación para fiscalAddress ---
             if (!parsedFiscalData.fiscalAddress || parsedFiscalData.fiscalAddress.trim().length === 0) {
                 await transaction.rollback();
                 return res.status(400).json({
@@ -412,24 +411,38 @@ app.post('/',
             
             const restaurantId = newRestaurant.id;
 
-            // --- CAMBIO 2: SECCIÓN DE SUBDOMINIO COMENTADA (Temporalmente deshabilitada) ---
-            /* let subdomain = null;
+            // --- INICIO DE LA LÓGICA DE SUBDOMINIO (NUEVA) ---
+            let subdomain = null;
             let subdomainUrl = null;
+            let subdomainCreated = false;
+            let subdomainMessage = "El subdominio se ha generado.";
             
             try {
+                // 1. Usamos la función que ya tenías para limpiar el nombre
                 subdomain = generateSubdomainName(parsedRestaurantData.name, restaurantId);
-                const subdomainCreated = await createCpanelSubdomain(subdomain);
                 
-                if (subdomainCreated) {
-                    const rootDomain = process.env.ROOT_DOMAIN || 'nextfactura.com.mx';
-                    subdomainUrl = `https://${subdomain}.${rootDomain}`;
-                    await newRestaurant.update({ subdomain, subdomainUrl }, { transaction });
+                // 2. Verificamos que no exista ya en la base de datos
+                const existing = await Restaurant.findOne({ where: { subdomain } });
+                if (existing) {
+                    throw new Error(`El subdominio '${subdomain}' ya está en uso.`);
                 }
+                
+                // 3. Obtenemos el dominio raíz desde las variables de entorno
+                const rootDomain = process.env.ROOT_DOMAIN || 'nextmanager.com.mx';
+                
+                // 4. Construimos la URL
+                subdomainUrl = `https://${subdomain}.${rootDomain}`;
+                
+                // 5. Guardamos la URL en la base de datos
+                await newRestaurant.update({ subdomain, subdomainUrl }, { transaction });
+                subdomainCreated = true;
+                
             } catch (subdomainError) {
-                // Ya no lanzamos un error, solo lo registramos por si se quiere revisar después.
-                console.error('[Restaurant-Service] Omitiendo error de subdominio (deshabilitado temporalmente):', subdomainError.message);
+                subdomainMessage = `Error al crear el subdominio: ${subdomainError.message}`;
+                logger.error('[Restaurant-Service] Error al generar el subdominio:', subdomainError.message);
+                // No detenemos la creación del restaurante, solo registramos el fallo.
             }
-            */
+            // --- FIN DE LA LÓGICA DE SUBDOMINIO ---
 
             // Procesar archivos
             const logoFile = req.files?.logo?.[0];
@@ -444,7 +457,7 @@ app.post('/',
                 await newRestaurant.update({ logoUrl }, { transaction });
             }
 
-            // Crear datos fiscales (el operador '...' ya incluye fiscalAddress si viene en el objeto)
+            // Crear datos fiscales
             const newFiscalData = await FiscalData.create({ 
                 ...parsedFiscalData, 
                 restaurantId,
@@ -463,8 +476,13 @@ app.post('/',
                 success: true, 
                 restaurant: safeRestaurant, 
                 fiscalData: safeFiscalData,
-                // Mensaje informativo sobre el subdominio
-                subdomain: { name: null, url: null, created: false, message: "La creación de subdominios está deshabilitada temporalmente." }
+                // Devolvemos el resultado de la operación del subdominio
+                subdomain: { 
+                    name: subdomain, 
+                    url: subdomainUrl, 
+                    created: subdomainCreated, 
+                    message: subdomainMessage 
+                }
             });
 
         } catch (error) {
@@ -483,7 +501,7 @@ app.post('/',
                 }
             }
             
-            console.error('[Restaurant-Service POST /] Error:', error);
+            logger.error('[Restaurant-Service POST /] Error:', error);
             res.status(500).json({ 
                 success: false, 
                 message: error.message || 'Error al crear el restaurante.' 
