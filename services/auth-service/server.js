@@ -777,10 +777,12 @@ app.post('/2fa/validate', async (req, res) => {
 // En services/auth-service/server.js
 // En services/auth-service/server.js
 
+// En services/auth-service/server.js
+
 app.get('/account-details', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        logger.info(`[Auth-Service /account-details] Buscando datos completos para el usuario: ${userId}`);
+        logger.info(`[Auth-Service /account-details] v2.0 - Buscando datos completos para el usuario: ${userId}`);
 
         // 1. Buscamos los datos principales en paralelo
         const [user, activeSubscription, restaurants] = await Promise.all([
@@ -795,11 +797,11 @@ app.get('/account-details', authenticateToken, async (req, res) => {
         ]);
 
         if (!user) {
-            logger.warn(`[Auth-Service /account-details] Usuario ${userId} no encontrado.`);
+            logger.warn(`[Auth-Service /account-details] v2.0 - Usuario ${userId} no encontrado.`);
             return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });
         }
 
-        // 2. Buscamos los datos fiscales del primer restaurante (si existe)
+        // 2. Buscamos los datos fiscales
         let fiscalData = null;
         if (restaurants && restaurants.length > 0) {
             const primaryRestaurantId = restaurants[0].id;
@@ -832,10 +834,15 @@ app.get('/account-details', authenticateToken, async (req, res) => {
             restaurants: restaurants || []
         };
 
+        // --- ¡LOG DE VERIFICACIÓN AÑADIDO! ---
+        // Si ves este log, significa que el nuevo código se está ejecutando.
+        logger.info(`[Auth-Service /account-details] v2.0 - DATOS CONSTRUIDOS. Nombre del plan: ${accountData.plan.name}`);
+        // --- FIN DEL LOG DE VERIFICACIÓN ---
+
         res.json({ success: true, data: accountData });
 
     } catch (error) {
-        logger.error('[Auth-Service /account-details] Error:', { error: error.message, stack: error.stack });
+        logger.error('[Auth-Service /account-details] v2.0 - Error:', { error: error.message, stack: error.stack });
         res.status(500).json({ success: false, message: 'Error interno del servidor al obtener los datos de la cuenta.' });
     }
 });
