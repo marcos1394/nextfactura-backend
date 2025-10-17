@@ -9,7 +9,7 @@ const path = require('path'); // ⚠️ FALTABA ESTE IMPORT
 require('dotenv').config();
 const { v4: uuidv4 } = require('uuid'); // <-- AÑADE ESTA LÍNEA
 const pendingRequests = new Map(); // <-- AÑADE ESTA LÍNEA
-
+const cookieParser = require('cookie-parser'); // <-- AÑADE ESTA IMPORTACIÓN
 
 
 // Importar el módulo de archivos seguros
@@ -40,7 +40,7 @@ app.use(cors({
 
 app.use(bodyParser.json({ limit: '10mb' })); // Aumentar límite para archivos
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
-
+app.use(cookieParser()); // <-- AÑADE ESTA LÍNEA
 // --- CONEXIÓN A REDIS ---
 const redisClient = redis.createClient({
     url: process.env.REDIS_URL || 'redis://localhost:6379'
