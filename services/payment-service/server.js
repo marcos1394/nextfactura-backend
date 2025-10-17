@@ -103,6 +103,11 @@ const PlanPurchase = sequelize.define('PlanPurchase', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     userId: { type: DataTypes.UUID, allowNull: false },
     planId: { type: DataTypes.UUID, allowNull: false },
+    
+    // --- CAMPOS AÑADIDOS ---
+    planName: { type: DataTypes.STRING, allowNull: true },
+    period: { type: DataTypes.STRING, allowNull: true }, // 'monthly' o 'annually'
+    
     origin: { type: DataTypes.STRING, allowNull: false },
     status: { type: DataTypes.STRING, defaultValue: 'pending', allowNull: false },
     price: { type: DataTypes.FLOAT, allowNull: false },
@@ -112,7 +117,7 @@ const PlanPurchase = sequelize.define('PlanPurchase', {
     paymentProvider: { type: DataTypes.STRING, defaultValue: 'mercadopago' },
     preferenceId: { type: DataTypes.STRING, allowNull: true },
 
-    // --- CAMPOS AÑADIDOS ---
+    // --- CAMPOS DE TIMBRES ---
     timbres_allocated: {
         type: DataTypes.INTEGER,
         allowNull: false,
@@ -246,13 +251,15 @@ app.post('/create-preference', authenticateToken, async (req, res) => {
         const planTitle = `Plan ${plan.name} (${billingCycle === 'annually' ? 'Anual' : 'Mensual'})`;
 
         // Creamos el registro de la compra en nuestra base de datos ANTES de ir a Mercado Pago
-        const purchase = await PlanPurchase.create({
-            userId,
-            planId,
-            price: price, // Usamos el precio correcto
-            status: 'pending_payment', // El estado inicial es pendiente de pago
-            origin: origin || 'unknown'
-        });
+       const purchase = await PlanPurchase.create({
+    userId,
+    planId,
+    price: price,
+    status: 'pending_payment',
+    origin: origin || 'unknown',
+    planName: plan.name, // <-- AÑADE ESTA LÍNEA
+    period: billingCycle // <-- AÑADE ESTA LÍNEA
+});
 
         // Preparamos los datos para la preferencia de Mercado Pago
         const preferenceData = {

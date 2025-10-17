@@ -172,18 +172,32 @@ const PlanPurchase = sequelize.define('PlanPurchase', {
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     userId: { type: DataTypes.UUID, allowNull: false },
     planId: { type: DataTypes.UUID, allowNull: false },
+    
+    // --- CAMPOS AÑADIDOS ---
+    planName: { type: DataTypes.STRING, allowNull: true },
+    period: { type: DataTypes.STRING, allowNull: true }, // 'monthly' o 'annually'
+    
     origin: { type: DataTypes.STRING, allowNull: false },
-    status: { type: DataTypes.STRING, allowNull: false, defaultValue: 'pending' },
-    price: { type: DataTypes.DOUBLE, allowNull: false },
+    status: { type: DataTypes.STRING, defaultValue: 'pending', allowNull: false },
+    price: { type: DataTypes.FLOAT, allowNull: false },
     purchaseDate: { type: DataTypes.DATE },
     expirationDate: { type: DataTypes.DATE },
-    paymentId: { type: DataTypes.STRING, unique: true },
+    paymentId: { type: DataTypes.STRING, allowNull: true, unique: true },
     paymentProvider: { type: DataTypes.STRING, defaultValue: 'mercadopago' },
-    preferenceId: { type: DataTypes.STRING }
-}, { 
-    tableName: 'plan_purchases', 
-    timestamps: true 
-});
+    preferenceId: { type: DataTypes.STRING, allowNull: true },
+
+    // --- CAMPOS DE TIMBRES ---
+    timbres_allocated: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0
+    },
+    timbres_used: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0
+    }
+}, { tableName: 'plan_purchases', timestamps: true });
 
 const Restaurant = sequelize.define('Restaurant', {
     id: { type: DataTypes.UUID, defaultValue: DataTypes.UUIDV4, primaryKey: true },
