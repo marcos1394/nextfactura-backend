@@ -862,19 +862,48 @@ app.get('/account-details', authenticateToken, async (req, res) => {
 });
 
 // --- Endpoint de Logout ---
+// En services/auth-service/server.js
+
 app.post('/logout', authenticateToken, async (req, res) => {
     try {
+        // --- 1. Lógica de Lista Negra de Redis (Tu código actual) ---
+        // Esto es bueno para invalidar el accessToken actual de inmediato.
         const jti = req.user.jti; 
         const exp = req.user.exp;
         const remainingTime = exp - Math.floor(Date.now() / 1000);
 
-        if (redisClient.isOpen && remainingTime > 0) {
+        if (redisClient.isOpen && jti && remainingTime > 0) {
             await redisClient.set(`blacklist:${jti}`, 'revoked', { 'EX': remainingTime });
+            logger.info(`[Auth-Logout] Token ${jti} añadido a la lista negra.`);
         }
+        
+        // Opcional: Invalidar el Refresh Token en la BD (como lo vimos para eliminar cuenta)
+        // await RefreshToken.destroy({ where: { token: hashedToken }});
 
+        // --- 2. Lógica de Borrado de Cookies (La parte que faltaba) ---
+        // Le decimos al navegador que borre las cookies estableciendo su edad máxima en 0.
+
+        res.cookie('accessToken', '', {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'lax',
+            path: '/',
+            maxAge: 0 // Expira inmediatamente
+        });
+
+        res.cookie('refreshToken', '', {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'lax',
+            path: '/api/auth/refresh-token',
+            maxAge: 0 // Expira inmediatamente
+        });
+        
+        // --- 3. Respuesta Final ---
         res.status(200).json({ success: true, message: 'Sesión cerrada exitosamente.' });
+
     } catch (error) {
-        console.error('[Auth-Service /logout] Error:', error);
+        logger.error('[Auth-Service /logout] Error:', error);
         res.status(500).json({ success: false, message: 'Error al cerrar la sesión.' });
     }
 });
