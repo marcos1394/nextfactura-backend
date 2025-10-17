@@ -201,6 +201,12 @@ const PortalConfig = sequelize.define('PortalConfig', {
     timestamps: true
 });
 
+const FiscalRegime = sequelize.define('FiscalRegime', {
+    code: { type: DataTypes.STRING, primaryKey: true, allowNull: false },
+    description: { type: DataTypes.TEXT, allowNull: false },
+    person_type: { type: DataTypes.CHAR(1), allowNull: false } // 'F' o 'M'
+}, { tableName: 'fiscal_regimes' });
+
 const Role = sequelize.define('Role', {
     name: { type: DataTypes.STRING, allowNull: false, unique: true }
 }, { timestamps: false });
@@ -509,6 +515,31 @@ app.post('/',
         }
     }
 );
+
+// En services/restaurant-service/server.js
+
+// GET /catalogs/fiscal-regimes - Devuelve la lista de regímenes fiscales
+app.get('/catalogs/fiscal-regimes', authenticateToken, async (req, res) => {
+    try {
+        // El query param 'type' permitirá al frontend filtrar (ej. /catalogs/fiscal-regimes?type=F)
+        const { type } = req.query;
+        let whereClause = {};
+
+        if (type === 'F' || type === 'M') {
+            whereClause.person_type = type;
+        }
+
+        const regimes = await FiscalRegime.findAll({
+            where: whereClause,
+            order: [['description', 'ASC']]
+        });
+
+        res.status(200).json({ success: true, regimes });
+    } catch (error) {
+        logger.error('[Restaurant-Service /catalogs/fiscal-regimes] Error:', error);
+        res.status(500).json({ success: false, message: 'Error al obtener el catálogo.' });
+    }
+});
 
 // Endpoint interno para que otros servicios obtengan datos de un restaurante
 app.get('/internal/data/:restaurantId', authenticateService, async (req, res) => {
