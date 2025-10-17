@@ -253,34 +253,38 @@ Restaurant.hasOne(PortalConfig, { foreignKey: 'restaurantId', onDelete: 'CASCADE
 PortalConfig.belongsTo(Restaurant, { foreignKey: 'restaurantId' });
 //...
 
-const authenticateToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
+const authenticateToken = async (req, res, next) => {
+    // Usamos el logger profesional
+    logger.info(`[Rest-Token] Iniciando validación para la ruta: ${req.originalUrl}`);
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return res.status(401).json({ success: false, message: 'Token no proporcionado o con formato incorrecto.' });
-    }
+    // Log para ver las cookies que llegan
+    logger.info({ message: "[Rest-Token] Cookies recibidas por el servicio:", cookies: req.cookies });
 
-    const token = authHeader.split(' ')[1];
+    const tokenFromHeader = req.headers['authorization']?.split(' ')[1];
+    const token = tokenFromHeader || req.cookies.accessToken?.split(' ')[1];
 
     if (!token) {
-        return res.status(401).json({ success: false, message: 'Token ausente después de "Bearer".' });
+        logger.warn(`[Rest-Token] ACCESO DENEGADO: No se encontró token ni en la cabecera ni en las cookies.`);
+        return res.status(401).json({ success: false, message: 'Token de acceso no proporcionado.' });
     }
 
+    logger.info(`[Rest-Token] Token encontrado. Intentando verificar...`);
     try {
-        // Simplemente verificamos el token y extraemos los datos del usuario.
-        // No necesitamos volver a consultar la base de datos aquí.
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = decoded; // Adjuntamos los datos del usuario (id, email, role) a la petición
-        next();
+        req.user = decoded;
+        logger.info(`[Rest-Token] ÉXITO: Token verificado para el usuario ${decoded.id}`);
+        return next();
     } catch (err) {
-        console.error(`[Service Auth] Error de verificación de token: ${err.name}`);
+        logger.error(`[Rest-Token] ERROR: La verificación del token falló.`, { errorName: err.name, errorMessage: err.message });
         
         if (err.name === 'TokenExpiredError') {
-            return res.status(401).json({ success: false, message: 'Token expirado.' });
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Token de acceso expirado.' 
+            });
         }
-        
-        // Cubre 'jwt malformed', 'invalid signature', etc.
-        return res.status(403).json({ success: false, message: 'Token inválido.' });
+
+        return res.status(403).json({ success: false, message: 'Token de acceso inválido.' });
     }
 };
 
