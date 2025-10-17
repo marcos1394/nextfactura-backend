@@ -741,6 +741,51 @@ app.get('/:id', authenticateToken, async (req, res) => {
     }
 });
 
+
+// Endpoint para verificar la disponibilidad de un subdominio
+app.get('/subdomain/check', authenticateToken, async (req, res) => {
+    const { name } = req.query;
+
+    // 1. Validar la entrada
+    if (!name || name.trim().length < 3) {
+        return res.status(400).json({ 
+            success: false, 
+            available: false,
+            message: "El nombre del subdominio debe tener al menos 3 caracteres." 
+        });
+    }
+
+    // 2. Validar el formato (solo letras minúsculas, números y guiones)
+    const subdomainRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+    if (!subdomainRegex.test(name)) {
+        return res.status(400).json({
+            success: false,
+            available: false,
+            message: "Formato inválido. Solo se permiten letras, números y guiones."
+        });
+    }
+
+    try {
+        // 3. Buscar en la base de datos si ya existe
+        const existing = await Restaurant.findOne({
+            where: {
+                subdomain: name
+            }
+        });
+
+        // 4. Enviar la respuesta de disponibilidad
+        if (existing) {
+            res.status(200).json({ success: true, available: false, message: "Este subdominio ya está en uso." });
+        } else {
+            res.status(200).json({ success: true, available: true });
+        }
+
+    } catch (error) {
+        logger.error('[Restaurant-Service /subdomain/check] Error:', error);
+        res.status(500).json({ success: false, available: false, message: 'Error interno del servidor.' });
+    }
+});
+
 // En services/restaurant-service/server.js
 
 // --- NUEVO ENDPOINT PÚBLICO PARA DATOS DEL PORTAL ---
