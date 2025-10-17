@@ -272,7 +272,7 @@ app.post('/create-preference', authenticateToken, async (req, res) => {
                 pending: `${process.env.CLIENT_URL_PROD}/payment-pending`
             },
             auto_return: 'approved',
-            notification_url: `${process.env.API_URL}/payments/webhook/mercadopago`,
+            notification_url: `${process.env.CLIENT_URL_PROD}/api/payments/webhook/mercadopago`,
             external_reference: purchase.id.toString(), // Enviamos nuestro ID de compra
         };
 
