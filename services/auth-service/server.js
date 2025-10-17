@@ -775,13 +775,14 @@ app.post('/2fa/validate', async (req, res) => {
 
 // --- ENDPOINT FINAL: OBTENER TODOS LOS DATOS DE LA CUENTA ---
 // En services/auth-service/server.js
+// En services/auth-service/server.js
 
 app.get('/account-details', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        console.log(`[Auth-Service /account-details] Buscando datos completos para el usuario: ${userId}`);
+        logger.info(`[Auth-Service /account-details] Buscando datos completos para el usuario: ${userId}`);
 
-        // 1. Buscamos los datos principales en paralelo para mayor eficiencia
+        // 1. Buscamos los datos principales en paralelo
         const [user, activeSubscription, restaurants] = await Promise.all([
             User.findByPk(userId, {
                 attributes: { exclude: ['password', 'passwordResetToken', 'passwordResetExpires', 'twoFactorSecret', 'emailVerificationToken', 'magicLinkToken', 'magicLinkExpires'] }
@@ -794,6 +795,7 @@ app.get('/account-details', authenticateToken, async (req, res) => {
         ]);
 
         if (!user) {
+            logger.warn(`[Auth-Service /account-details] Usuario ${userId} no encontrado.`);
             return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });
         }
 
@@ -807,7 +809,7 @@ app.get('/account-details', authenticateToken, async (req, res) => {
         // 3. Construimos el objeto de respuesta final y completo
         const accountData = {
             profile: {
-                id: user.id, // <-- ¡LA LÍNEA QUE FALTABA!
+                id: user.id,
                 name: user.name,
                 email: user.email,
                 avatarUrl: user.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=random`,
@@ -833,11 +835,10 @@ app.get('/account-details', authenticateToken, async (req, res) => {
         res.json({ success: true, data: accountData });
 
     } catch (error) {
-        console.error('[Auth-Service /account-details] Error:', error);
+        logger.error('[Auth-Service /account-details] Error:', { error: error.message, stack: error.stack });
         res.status(500).json({ success: false, message: 'Error interno del servidor al obtener los datos de la cuenta.' });
     }
 });
-
 
 // --- Endpoint de Logout ---
 app.post('/logout', authenticateToken, async (req, res) => {
