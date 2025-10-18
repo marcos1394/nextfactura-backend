@@ -542,48 +542,46 @@ app.get('/catalogs/fiscal-regimes', authenticateToken, async (req, res) => {
     }
 });
 
-// Endpoint para redirigir a la última versión del instalador
 app.get('/public/latest-installer', async (req, res) => {
+    // Usamos console.log para una depuración infalible
+    console.log('[latest-installer] INICIO: Petición recibida.');
+    
     const publicDir = path.join(__dirname, 'secure_uploads', 'public');
     const filePrefix = 'NextFactura-Connector-';
     const fileSuffix = '.msi';
     
-    logger.info(`[latest-installer] Petición recibida. Buscando en: ${publicDir}`);
-
     try {
         const allFiles = await fs.readdir(publicDir);
-        logger.info(`[latest-installer] Archivos encontrados: ${allFiles.join(', ')}`);
+        console.log(`[latest-installer] Archivos encontrados: ${allFiles.join(', ')}`);
 
         const installerFiles = allFiles
             .filter(file => file.startsWith(filePrefix) && file.endsWith(fileSuffix))
             .map(file => {
-                // --- CORRECCIÓN LÓGICA ---
-                // Extraemos la versión, ej: "1.0.2"
                 const versionString = file.slice(filePrefix.length, -fileSuffix.length);
+                const validVersion = semver.valid(semver.coerce(versionString));
+                console.log(`[latest-installer] Archivo procesado: ${file} | Versión extraída: ${versionString} | Válida: ${validVersion}`);
                 return {
                     name: file,
-                    version: versionString
+                    version: validVersion
                 };
             })
-            .filter(file => semver.valid(file.version)); // Solo dejamos los que son versiones válidas
-
-        logger.info(`[latest-installer] Archivos de instalador válidos encontrados: ${installerFiles.map(f => f.name).join(', ')}`);
+            .filter(file => file.version !== null);
 
         if (installerFiles.length === 0) {
-            logger.warn('[latest-installer] No se encontraron archivos de instalador válidos.');
+            console.warn('[latest-installer] No se encontraron archivos de instalador válidos.');
             return res.status(404).json({ success: false, message: 'No se encontró ningún instalador.' });
         }
 
-        // Ordenamos usando la comparación de semver (más nuevo primero)
         installerFiles.sort((a, b) => semver.rcompare(a.version, b.version));
-
+        
         const latestFilename = installerFiles[0].name;
 
-        logger.info(`[latest-installer] ÉXITO: Redirigiendo a la última versión: ${latestFilename}`);
+        console.log(`[latest-installer] ÉXITO: Redirigiendo a: ${latestFilename}`);
         res.redirect(302, `/api/restaurants/public/${latestFilename}`);
         
     } catch (error) {
-        logger.error('[Restaurant-Service /latest-installer] Error fatal:', error);
+        // Registramos el error con console.error
+        console.error('[Restaurant-Service /latest-installer] Error fatal:', error);
         res.status(500).json({ success: false, message: 'Error al buscar el último instalador.' });
     }
 });
