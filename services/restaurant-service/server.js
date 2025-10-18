@@ -10,6 +10,7 @@ require('dotenv').config();
 const { v4: uuidv4 } = require('uuid'); // <-- AÑADE ESTA LÍNEA
 const pendingRequests = new Map(); // <-- AÑADE ESTA LÍNEA
 const cookieParser = require('cookie-parser'); // <-- AÑADE ESTA IMPORTACIÓN
+const semver = require('semver'); // La librería que acabamos de instalar
 
 
 // Importar el módulo de archivos seguros
@@ -538,6 +539,50 @@ app.get('/catalogs/fiscal-regimes', authenticateToken, async (req, res) => {
     } catch (error) {
         logger.error('[Restaurant-Service /catalogs/fiscal-regimes] Error:', error);
         res.status(500).json({ success: false, message: 'Error al obtener el catálogo.' });
+    }
+});
+
+// Endpoint para redirigir a la última versión del instalador
+app.get('/public/latest-installer', async (req, res) => {
+    const publicDir = path.join(__dirname, 'secure_uploads', 'public');
+    const filePrefix = 'NextFactura-Connector-';
+    const fileSuffix = '.msi';
+
+    try {
+        const allFiles = await fs.readdir(publicDir);
+
+        // 1. Filtramos solo los archivos que nos interesan
+        const installerFiles = allFiles.filter(file => 
+            file.startsWith(filePrefix) && file.endsWith(fileSuffix)
+        );
+
+        if (installerFiles.length === 0) {
+            return res.status(404).json({ success: false, message: 'No se encontró ningún instalador.' });
+        }
+
+        // 2. Extraemos las versiones usando semver
+        const versions = installerFiles.map(file => {
+            const versionString = file.substring(filePrefix.length, file.length - fileSuffix.length);
+            return semver.valid(semver.coerce(versionString)); // Limpia y valida la versión
+        }).filter(Boolean); // Filtra cualquier versión nula o inválida
+
+        if (versions.length === 0) {
+            return res.status(404).json({ success: false, message: 'No se encontraron versiones válidas.' });
+        }
+
+        // 3. Ordenamos las versiones (la más alta primero)
+        versions.sort(semver.rcompare);
+        const latestVersion = versions[0];
+
+        // 4. Construimos el nombre del archivo final
+        const latestFilename = `${filePrefix}${latestVersion}${fileSuffix}`;
+
+        // 5. Redirigimos al usuario al endpoint de descarga que ya tienes
+        res.redirect(302, `/api/restaurants/public/${latestFilename}`);
+        
+    } catch (error) {
+        logger.error('[Restaurant-Service /latest-installer] Error:', error);
+        res.status(500).json({ success: false, message: 'Error al buscar el último instalador.' });
     }
 });
 
