@@ -551,7 +551,7 @@ app.get('/public/latest-installer', async (req, res) => {
     try {
         const allFiles = await fs.readdir(publicDir);
 
-        // 1. Filtramos solo los archivos que nos interesan
+        // 1. Filtramos los archivos
         const installerFiles = allFiles.filter(file => 
             file.startsWith(filePrefix) && file.endsWith(fileSuffix)
         );
@@ -560,24 +560,28 @@ app.get('/public/latest-installer', async (req, res) => {
             return res.status(404).json({ success: false, message: 'No se encontró ningún instalador.' });
         }
 
-        // 2. Extraemos las versiones usando semver
+        // 2. Extraemos las versiones
         const versions = installerFiles.map(file => {
-            const versionString = file.substring(filePrefix.length, file.length - fileSuffix.length);
-            return semver.valid(semver.coerce(versionString)); // Limpia y valida la versión
-        }).filter(Boolean); // Filtra cualquier versión nula o inválida
+            // --- CORRECCIÓN CLAVE ---
+            // Usamos .slice() en lugar de .substring()
+            const versionString = file.slice(filePrefix.length, -fileSuffix.length);
+            // --- FIN DE LA CORRECCIÓN ---
+            
+            return semver.valid(semver.coerce(versionString));
+        }).filter(Boolean);
 
         if (versions.length === 0) {
             return res.status(404).json({ success: false, message: 'No se encontraron versiones válidas.' });
         }
 
-        // 3. Ordenamos las versiones (la más alta primero)
+        // 3. Ordenamos (la más alta primero)
         versions.sort(semver.rcompare);
         const latestVersion = versions[0];
 
-        // 4. Construimos el nombre del archivo final
+        // 4. Construimos el nombre final
         const latestFilename = `${filePrefix}${latestVersion}${fileSuffix}`;
 
-        // 5. Redirigimos al usuario al endpoint de descarga que ya tienes
+        // 5. Redirigimos al endpoint de descarga
         res.redirect(302, `/api/restaurants/public/${latestFilename}`);
         
     } catch (error) {
