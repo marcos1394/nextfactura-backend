@@ -548,50 +548,37 @@ app.get('/public/latest-installer', async (req, res) => {
     const filePrefix = 'NextFactura-Connector-';
     const fileSuffix = '.msi';
     
-    // Log de inicio
     logger.info(`[latest-installer] Petición recibida. Buscando en: ${publicDir}`);
 
     try {
         const allFiles = await fs.readdir(publicDir);
-        // Log para ver todos los archivos encontrados
-        logger.info(`[latest-installer] Archivos encontrados en el directorio: ${allFiles.join(', ')}`);
+        logger.info(`[latest-installer] Archivos encontrados: ${allFiles.join(', ')}`);
 
-        // 1. Filtramos y mapeamos los archivos
         const installerFiles = allFiles
-            .filter(file => {
-                const matches = file.startsWith(filePrefix) && file.endsWith(fileSuffix);
-                if (!matches) {
-                    logger.info(`[latest-installer] Descartando archivo (no coincide): ${file}`);
-                }
-                return matches;
-            })
+            .filter(file => file.startsWith(filePrefix) && file.endsWith(fileSuffix))
             .map(file => {
-                // 2. Extraemos la versión
+                // --- CORRECCIÓN LÓGICA ---
+                // Extraemos la versión, ej: "1.0.2"
                 const versionString = file.slice(filePrefix.length, -fileSuffix.length);
-                const validVersion = semver.valid(semver.coerce(versionString));
-                
-                // Log de cada archivo que coincide
-                logger.info(`[latest-installer] Archivo coincidente: ${file} | Versión extraída: "${versionString}" | Versión válida (semver): ${validVersion}`);
-                
                 return {
                     name: file,
-                    version: validVersion
+                    version: versionString
                 };
             })
-            .filter(file => file.version !== null); // Filtramos cualquier archivo con nombre inválido
+            .filter(file => semver.valid(file.version)); // Solo dejamos los que son versiones válidas
+
+        logger.info(`[latest-installer] Archivos de instalador válidos encontrados: ${installerFiles.map(f => f.name).join(', ')}`);
 
         if (installerFiles.length === 0) {
-            logger.warn('[latest-installer] No se encontraron archivos de instalador válidos después de filtrar.');
+            logger.warn('[latest-installer] No se encontraron archivos de instalador válidos.');
             return res.status(404).json({ success: false, message: 'No se encontró ningún instalador.' });
         }
 
-        // 3. Ordenamos (la más alta primero)
+        // Ordenamos usando la comparación de semver (más nuevo primero)
         installerFiles.sort((a, b) => semver.rcompare(a.version, b.version));
 
-        // 4. Seleccionamos el primero (el más nuevo)
         const latestFilename = installerFiles[0].name;
 
-        // 5. Redirigimos
         logger.info(`[latest-installer] ÉXITO: Redirigiendo a la última versión: ${latestFilename}`);
         res.redirect(302, `/api/restaurants/public/${latestFilename}`);
         
