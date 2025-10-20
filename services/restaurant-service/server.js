@@ -361,6 +361,54 @@ const generateSubdomainName = (restaurantName, restaurantId) => {
 createSecureDirectories().catch(console.error);
 
 // --- RUTAS DE ARCHIVOS ---
+
+app.get('/public/latest-installer', async (req, res) => {
+    // Usamos console.log para depuración infalible
+    console.log('[latest-installer] INICIO: Petición recibida.');
+    
+    const publicDir = path.join(__dirname, 'secure_uploads', 'public');
+    const filePrefix = 'NextFactura-Connector-';
+    const fileSuffix = '.msi';
+    
+    try {
+        const allFiles = await fs.readdir(publicDir);
+        console.log(`[latest-installer] Archivos encontrados: ${allFiles.join(', ')}`);
+
+        const installerFiles = allFiles
+            .filter(file => file.startsWith(filePrefix) && file.endsWith(fileSuffix))
+            .map(file => {
+                // --- CORRECCIÓN LÓGICA ---
+                // Extraemos la versión, ej: "1.0.2"
+                const versionString = file.slice(filePrefix.length, -fileSuffix.length);
+                return {
+                    name: file,
+                    version: versionString // Guardamos la versión como string
+                };
+            })
+            // Usamos semver.valid() que es más estricto y correcto
+            .filter(file => semver.valid(file.version)); 
+
+        console.log(`[latest-installer] Archivos de instalador válidos: ${installerFiles.map(f => f.name).join(', ')}`);
+
+        if (installerFiles.length === 0) {
+            console.warn('[latest-installer] No se encontraron archivos de instalador válidos.');
+            return res.status(404).json({ success: false, message: 'No se encontró ningún instalador.' });
+        }
+
+        // Ordenamos usando la comparación de semver (más nuevo primero)
+        installerFiles.sort((a, b) => semver.rcompare(a.version, b.version));
+
+        const latestFilename = installerFiles[0].name;
+
+        console.log(`[latest-installer] ÉXITO: Redirigiendo a: ${latestFilename}`);
+        res.redirect(302, `/api/restaurants/public/${latestFilename}`);
+        
+    } catch (error) {
+        console.error('[Restaurant-Service /latest-installer] Error fatal:', error);
+        res.status(500).json({ success: false, message: 'Error al buscar el último instalador.' });
+    }
+});
+
 app.get('/public/:filename', servePublicFile);
 app.get('/restaurants/:restaurantId/private/:filename', authenticateToken, servePrivateFile);
 
@@ -544,52 +592,6 @@ app.get('/catalogs/fiscal-regimes', authenticateToken, async (req, res) => {
 
 // En services/restaurant-service/server.js
 
-app.get('/public/latest-installer', async (req, res) => {
-    // Usamos console.log para depuración infalible
-    console.log('[latest-installer] INICIO: Petición recibida.');
-    
-    const publicDir = path.join(__dirname, 'secure_uploads', 'public');
-    const filePrefix = 'NextFactura-Connector-';
-    const fileSuffix = '.msi';
-    
-    try {
-        const allFiles = await fs.readdir(publicDir);
-        console.log(`[latest-installer] Archivos encontrados: ${allFiles.join(', ')}`);
-
-        const installerFiles = allFiles
-            .filter(file => file.startsWith(filePrefix) && file.endsWith(fileSuffix))
-            .map(file => {
-                // --- CORRECCIÓN LÓGICA ---
-                // Extraemos la versión, ej: "1.0.2"
-                const versionString = file.slice(filePrefix.length, -fileSuffix.length);
-                return {
-                    name: file,
-                    version: versionString // Guardamos la versión como string
-                };
-            })
-            // Usamos semver.valid() que es más estricto y correcto
-            .filter(file => semver.valid(file.version)); 
-
-        console.log(`[latest-installer] Archivos de instalador válidos: ${installerFiles.map(f => f.name).join(', ')}`);
-
-        if (installerFiles.length === 0) {
-            console.warn('[latest-installer] No se encontraron archivos de instalador válidos.');
-            return res.status(404).json({ success: false, message: 'No se encontró ningún instalador.' });
-        }
-
-        // Ordenamos usando la comparación de semver (más nuevo primero)
-        installerFiles.sort((a, b) => semver.rcompare(a.version, b.version));
-
-        const latestFilename = installerFiles[0].name;
-
-        console.log(`[latest-installer] ÉXITO: Redirigiendo a: ${latestFilename}`);
-        res.redirect(302, `/api/restaurants/public/${latestFilename}`);
-        
-    } catch (error) {
-        console.error('[Restaurant-Service /latest-installer] Error fatal:', error);
-        res.status(500).json({ success: false, message: 'Error al buscar el último instalador.' });
-    }
-});
 
 // Endpoint interno para que otros servicios obtengan datos de un restaurante
 app.get('/internal/data/:restaurantId', authenticateService, async (req, res) => {
