@@ -919,7 +919,7 @@ app.get('/public/data/:restaurantId', async (req, res) => {
 });
 
 // --- ENDPOINT: GENERAR AGENT KEY (NUEVO) ---
-app.post('/restaurants/:restaurantId/generate-agent-key', authenticateToken, async (req, res) => {
+app.post('/:restaurantId/generate-agent-key', authenticateToken, async (req, res) => {
     const { restaurantId } = req.params;
     const userId = req.user.id;
     const logPrefix = '[Restaurant-Service /generate-agent-key]';
