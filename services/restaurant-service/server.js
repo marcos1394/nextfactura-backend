@@ -1150,13 +1150,66 @@ app.post('/portal/:restaurantId/search-ticket', async (req, res) => {
     }
 });
 
-
-// 3. GENERAR LA FACTURA FINAL
 // En services/restaurant-service/server.js
 
-// 3. GENERAR LA FACTURA FINAL
-// =======================================================
-// En services/restaurant-service/server.js
+// --- ENDPOINT: OBTENER CONFIGURACIÓN COMPLETA DEL RESTAURANTE ---
+app.get('/full-config', authenticateToken, async (req, res) => {
+    const userId = req.user.id;
+    const logPrefix = '[Restaurant-Service /full-config]';
+
+    try {
+        logger.info(`${logPrefix} Buscando configuración completa para el usuario: ${userId}`);
+
+        // 1. Buscamos todos los restaurantes del usuario E INCLUIMOS sus datos fiscales
+        const restaurants = await Restaurant.findAll({
+            where: { userId: userId },
+            include: [{
+                model: FiscalData,
+                attributes: { exclude: ['csdPassword'] } // Excluimos la contraseña por seguridad
+            }],
+            order: [['createdAt', 'ASC']]
+        });
+
+        if (!restaurants || restaurants.length === 0) {
+            logger.info(`${logPrefix} No se encontraron restaurantes para el usuario ${userId}.`);
+            // Devolvemos un array vacío, el frontend lo interpretará
+            return res.json({ success: true, restaurants: [] });
+        }
+
+        // 2. Formateamos los datos para que coincidan con la estructura del frontend
+        const formattedData = restaurants.map(r => {
+            const fiscal = r.FiscalData || {}; // Usamos un objeto vacío si no hay datos fiscales
+            return {
+                id: r.id,
+                name: r.name,
+                address: r.address,
+                connectionMethod: r.connectionMethod,
+                agentKey: r.agentKey,
+                dbHost: r.dbHost,
+                dbPort: r.dbPort,
+                dbName: r.dbName,
+                dbUser: r.dbUser,
+                dbPassword: '', // NUNCA enviamos la contraseña de la BD al frontend
+                // Datos Fiscales
+                rfc: fiscal.rfc,
+                businessName: fiscal.businessName,
+                fiscalRegime: fiscal.fiscalRegime,
+                fiscalAddress: fiscal.fiscalAddress,
+                csdPassword: '', // NUNCA enviamos la contraseña del CSD al frontend
+                // Las URLs de los archivos para que el frontend pueda mostrarlos
+                csdCertificateUrl: fiscal.csdCertificateUrl,
+                csdKeyUrl: fiscal.csdKeyUrl
+            };
+        });
+
+        logger.info(`${logPrefix} Configuración completa encontrada y enviada para el usuario ${userId}.`);
+        res.json({ success: true, restaurants: formattedData });
+
+    } catch (error) {
+        logger.error(`${logPrefix} Error:`, error);
+        res.status(500).json({ success: false, message: 'Error al obtener la configuración del restaurante.' });
+    }
+});
 
 // --- ENDPOINT FINAL Y COMPLETO ---
 // En services/restaurant-service/server.js
