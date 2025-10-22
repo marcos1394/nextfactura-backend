@@ -11,7 +11,7 @@ const { v4: uuidv4 } = require('uuid'); // <-- AÑADE ESTA LÍNEA
 const pendingRequests = new Map(); // <-- AÑADE ESTA LÍNEA
 const cookieParser = require('cookie-parser'); // <-- AÑADE ESTA IMPORTACIÓN
 const semver = require('semver'); // La librería que acabamos de instalar
-
+const crypto = require('crypto'); // <-- AÑADE ESTA LÍNEA
 
 // Importar el módulo de archivos seguros
 const { 
@@ -915,6 +915,54 @@ app.get('/public/data/:restaurantId', async (req, res) => {
     } catch (error) {
         console.error(`[Service /public/data] Error:`, error);
         res.status(500).json({ success: false, message: 'Error al obtener datos del restaurante.' });
+    }
+});
+
+// --- ENDPOINT: GENERAR AGENT KEY (NUEVO) ---
+app.post('/restaurants/:restaurantId/generate-agent-key', authenticateToken, async (req, res) => {
+    const { restaurantId } = req.params;
+    const userId = req.user.id;
+    const logPrefix = '[Restaurant-Service /generate-agent-key]';
+
+    try {
+        logger.info(`${logPrefix} Solicitud para generar clave para el restaurante: ${restaurantId}`);
+
+        // 1. Buscar el restaurante y verificar que pertenece al usuario
+        const restaurant = await Restaurant.findOne({
+            where: {
+                id: restaurantId,
+                userId: userId // ¡Importante! Asegura que solo el dueño pueda generar claves
+            }
+        });
+
+        if (!restaurant) {
+            logger.warn(`${logPrefix} No se encontró el restaurante o el usuario no es el propietario.`);
+            return res.status(404).json({ success: false, message: 'Restaurante no encontrado o no autorizado.' });
+        }
+
+        // 2. Generar una clave de agente segura y única
+        // Esto crea una cadena de 64 caracteres aleatorios
+        const agentKey = crypto.randomBytes(32).toString('hex');
+
+        // 3. Guardar la nueva clave en la base de datos
+        restaurant.agentKey = agentKey;
+        await restaurant.save();
+
+        logger.info(`${logPrefix} Clave generada y guardada exitosamente para el restaurante: ${restaurantId}`);
+
+        // 4. Devolver la clave al frontend (esta es la única vez que se muestra)
+        res.status(200).json({
+            success: true,
+            agentKey: agentKey,
+            message: 'Clave de agente generada exitosamente.'
+        });
+
+    } catch (error) {
+        logger.error(`${logPrefix} Error:`, error);
+        res.status(500).json({
+            success: false,
+            message: 'Error interno al generar la clave de agente.'
+        });
     }
 });
 
