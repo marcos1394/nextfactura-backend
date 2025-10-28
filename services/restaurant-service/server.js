@@ -136,7 +136,7 @@ const Restaurant = sequelize.define('Restaurant', {
     connectionMethod: {
         type: DataTypes.STRING,
         allowNull: false,
-        defaultValue: 'direct', // Por defecto, los restaurantes usan conexión directa
+        defaultValue: 'agent', // Por defecto, los restaurantes usan conexión directa
         validate: {
             isIn: [['direct', 'agent']] // Solo permite estos dos valores
         }
