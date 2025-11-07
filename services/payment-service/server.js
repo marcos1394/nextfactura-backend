@@ -232,69 +232,85 @@ app.get('/plans', async (req, res) => {
 
 // POST /create-preference - Ruta protegida para crear una preferencia de pago
 app.post('/create-preference', authenticateToken, async (req, res) => {
-    // Obtenemos 'billingCycle' y 'userId' del cuerpo de la petición
-    const { planId, billingCycle, userId, origin } = req.body;
+    const { planId, billingCycle, userId, payerInfo, origin } = req.body;
+    const logPrefix = '[Payment-Service /create-preference]';
 
-    // Validación robusta de los datos de entrada
-    if (!planId || !billingCycle || !userId) {
-        return res.status(400).json({ success: false, message: 'Faltan datos requeridos (planId, billingCycle, userId).' });
+    if (!planId || !billingCycle || !userId || !payerInfo) {
+        return res.status(400).json({ success: false, message: 'Faltan datos requeridos (planId, billingCycle, userId, payerInfo).' });
     }
 
     try {
         const plan = await Plan.findByPk(planId);
         if (!plan) {
+            logger.warn(`${logPrefix} Plan no encontrado: ${planId}`);
             return res.status(404).json({ success: false, message: 'Plan no encontrado.' });
         }
 
-        // --- LÓGICA CLAVE: Seleccionar el precio correcto ---
         const price = billingCycle === 'annually' ? plan.price_annually : plan.price_monthly;
         const planTitle = `Plan ${plan.name} (${billingCycle === 'annually' ? 'Anual' : 'Mensual'})`;
 
-        // Creamos el registro de la compra en nuestra base de datos ANTES de ir a Mercado Pago
-       const purchase = await PlanPurchase.create({
-    userId,
-    planId,
-    price: price,
-    status: 'pending_payment',
-    origin: origin || 'unknown',
-    planName: plan.name, // <-- AÑADE ESTA LÍNEA
-    period: billingCycle // <-- AÑADE ESTA LÍNEA
-});
+        const purchase = await PlanPurchase.create({
+            userId,
+            planId,
+            price: price,
+            status: 'pending_payment',
+            origin: origin || 'unknown',
+            planName: plan.name,
+            period: billingCycle
+        });
 
-        // Preparamos los datos para la preferencia de Mercado Pago
+        // --- LÓGICA DE URLs DE RETORNO DINÁMICAS ---
+        const webBackUrls = {
+            success: `${process.env.CLIENT_URL_PROD}/payment-success`,
+            failure: `${process.env.CLIENT_URL_PROD}/payment-failure`,
+            pending: `${process.env.CLIENT_URL_PROD}/payment-pending`
+        };
+        
+        // Define tus Deep Links para la app mobile (ej: nextmanager://)
+        const mobileBackUrls = {
+            success: 'nextmanager://payment/success',
+            failure: 'nextmanager://payment/failure',
+            pending: 'nextmanager://payment/pending'
+        };
+
+        // Elige las URLs correctas basado en el origen de la petición
+        const back_urls = (origin === 'mobile_app_onboarding') ? mobileBackUrls : webBackUrls;
+        // --- FIN DE LA LÓGICA DE URLs ---
+
         const preferenceData = {
             items: [{
                 id: plan.id,
                 title: planTitle,
                 quantity: 1,
-                unit_price: price, // Usamos el precio correcto
+                unit_price: price,
                 currency_id: 'MXN'
             }],
             payer: {
-                email: req.user.email
+                email: payerInfo.email,
+                name: payerInfo.name,
+                surname: payerInfo.surname
             },
-            back_urls: {
-                success: `${process.env.CLIENT_URL_PROD}/payment-success`,
-                failure: `${process.env.CLIENT_URL_PROD}/payment-failure`,
-                pending: `${process.env.CLIENT_URL_PROD}/payment-pending`
-            },
+            back_urls: back_urls, // <-- URLs DINÁMICAS
             auto_return: 'approved',
             notification_url: `${process.env.CLIENT_URL_PROD}/api/payments/webhook/mercadopago`,
-            external_reference: purchase.id.toString(), // Enviamos nuestro ID de compra
+            external_reference: purchase.id.toString(),
         };
 
-        // Creamos la preferencia en Mercado Pago
         const result = await preference.create({ body: preferenceData });
         
-        // Actualizamos nuestro registro de compra con el ID de la preferencia de Mercado Pago
         purchase.preferenceId = result.id;
         await purchase.save();
 
-        console.log(`[Payment] Preferencia ${result.id} creada para la compra ${purchase.id}.`);
-        res.status(201).json({ success: true, init_point: result.init_point, preferenceId: result.id });
+        logger.info(`${logPrefix} Preferencia ${result.id} creada para compra ${purchase.id}. Origen: ${origin}`);
+        res.status(201).json({ 
+            success: true, 
+            init_point: result.init_point, 
+            preferenceId: result.id,
+            external_reference: purchase.id.toString() // <-- Devolvemos nuestro ID de compra
+        });
 
     } catch (error) {
-        console.error('[Payment-Service /create-preference] Error:', error);
+        logger.error(`${logPrefix} Error:`, error);
         res.status(500).json({ success: false, message: 'Error al crear la preferencia de pago.' });
     }
 });
