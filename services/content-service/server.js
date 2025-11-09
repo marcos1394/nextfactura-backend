@@ -121,6 +121,34 @@ app.get('/help-center/search', async (req, res) => {
     }
 });
 
+// Endpoint para CREAR un nuevo artículo de ayuda
+app.post('/help-center/articles', async (req, res) => {
+    const { categoryId, title, slug, content, isPopular } = req.body;
+    console.log(`[Content-Service] Petición recibida para CREAR artículo`);
+
+    if (!categoryId || !title || !slug || !content) {
+        return res.status(400).json({ success: false, message: 'Faltan campos requeridos: categoryId, title, slug, content.' });
+    }
+
+    try {
+        const newArticle = await HelpArticle.create({
+            categoryId,
+            title,
+            slug,
+            content,
+            isPopular: isPopular || false
+        });
+        console.log(`[Content-Service] Nuevo artículo creado: ${newArticle.id}`);
+        res.status(201).json({ success: true, article: newArticle });
+    } catch (error) {
+        console.error("[Content-Service /articles POST] Error:", error);
+        if (error.name === 'SequelizeUniqueConstraintError') {
+            return res.status(409).json({ success: false, message: 'El "slug" (URL corta) ya existe.' });
+        }
+        res.status(500).json({ success: false, message: 'Error al crear el artículo.' });
+    }
+});
+
 // ------------------------------------------------------------------
 // --- ARRANQUE DEL SERVIDOR ---
 // ------------------------------------------------------------------
