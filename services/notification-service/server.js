@@ -108,7 +108,7 @@ app.post('/contact-form', async (req, res) => {
 });
 
 // --- ARRANQUE DEL SERVIDOR ---
-const PORT = process.env.NOTIFICATION_SERVICE_PORT || 4007;
+const PORT = process.env.NOTIFICATION_SERVICE_PORT || 4005;
 app.listen(PORT, () => {
     console.log(`🚀 Notification-Service escuchando en el puerto ${PORT}`);
     if (!process.env.RESEND_API_KEY) {
