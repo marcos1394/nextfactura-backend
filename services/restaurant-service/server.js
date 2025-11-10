@@ -42,6 +42,10 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '10mb' })); // Aumentar límite para archivos
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser()); // <-- AÑADE ESTA LÍNEA
+// Endpoint de salud para Docker y monitoreo
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok' });
+});
 // --- CONEXIÓN A REDIS ---
 const redisClient = redis.createClient({
     url: process.env.REDIS_URL || 'redis://localhost:6379'
