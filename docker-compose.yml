@@ -43,14 +43,22 @@ services:
     ports:
       - "4000:8080"
     depends_on:
-      - auth-service
-      - restaurant-service
-      - payment-service
-      - pos-service
-      - pac-service
-      - connector-service
-      - notification-service
-      - content-service # <-- DEPENDENCIA AÑADIDA
+      auth-service:
+        condition: service_started
+      restaurant-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_started
+      pos-service:
+        condition: service_started
+      pac-service:
+        condition: service_started
+      connector-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_started
+      content-service:
+        condition: service_started
     networks:
       - app-net
   
@@ -78,6 +86,12 @@ services:
       - app-net
     volumes:
       - /home/servidor/secure_uploads:/app/secure_uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4002/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
 
   payment-service:
     build: ./services/payment-service
@@ -97,9 +111,9 @@ services:
       postgres:
         condition: service_healthy
       restaurant-service:
-        condition: service_started
+        condition: service_healthy
       connector-service:
-        condition: service_started
+        condition: service_healthy
     networks:
       - app-net
       
@@ -124,6 +138,12 @@ services:
         condition: service_healthy
     networks:
       - app-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4006/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
 
   notification-service:
     build: ./services/notification-service
