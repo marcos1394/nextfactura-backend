@@ -452,6 +452,7 @@ app.post('/register', async (req, res) => {
             success: true, 
             message: 'Usuario registrado y sesión iniciada.',
             accessToken: `Bearer ${accessToken}`, // Para la app mobile
+            refreshToken: refreshToken, // <--- ¡AGREGA ESTA LÍNEA!
             user: userResponse 
         });
 
