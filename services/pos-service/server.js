@@ -195,6 +195,176 @@ app.post('/test-connection', authenticateToken, async (req, res) => {
     }
 });
 
+// Función auxiliar para formatear fechas a YYYY-MM-DD
+const formatDate = (date) => date.toISOString().split('T')[0];
+
+app.get('/reports/:restaurantId', authenticateToken, async (req, res) => {
+    const { restaurantId } = req.params;
+    const { reportType = 'sales', dateRange = 'Semana' } = req.query;
+    const logPrefix = `[POS-Service /reports/${restaurantId}]`;
+
+    logger.info(`${logPrefix} Petición recibida. Tipo: ${reportType}, Rango: ${dateRange}`);
+
+    try {
+        // --- 1. CONSTRUCCIÓN DE FILTRO DE FECHA DINÁMICO ---
+        let dateFilter = '';
+        const today = new Date();
+        
+        switch (dateRange) {
+            case 'Hoy':
+                dateFilter = `WHERE CAST(fecha AS DATE) = '${formatDate(today)}'`;
+                break;
+            case 'Ayer':
+                const yesterday = new Date();
+                yesterday.setDate(today.getDate() - 1);
+                dateFilter = `WHERE CAST(fecha AS DATE) = '${formatDate(yesterday)}'`;
+                break;
+            case 'Mes':
+                const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+                const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+                dateFilter = `WHERE CAST(fecha AS DATE) BETWEEN '${formatDate(firstDayOfMonth)}' AND '${formatDate(lastDayOfMonth)}'`;
+                break;
+            case 'Semana':
+            default:
+                const sevenDaysAgo = new Date();
+                sevenDaysAgo.setDate(today.getDate() - 6);
+                dateFilter = `WHERE CAST(fecha AS DATE) BETWEEN '${formatDate(sevenDaysAgo)}' AND '${formatDate(today)}'`;
+                break;
+        }
+
+        // --- 2. SELECCIÓN DE LA CONSULTA SQL ---
+        let query;
+        switch (reportType) {
+            case 'products':
+                query = `
+                    SELECT TOP 10 p.descripcion as name, SUM(cd.cantidad) as totalQuantity, SUM(cd.precio * cd.cantidad) as totalSales
+                    FROM cheqdet cd 
+                    JOIN Productos p ON cd.idproducto = p.idproducto
+                    JOIN cheques c ON cd.folio = c.folio
+                    ${dateFilter.replace('WHERE', 'AND')} -- cheqdet no tiene fecha, usamos el join
+                    GROUP BY p.descripcion 
+                    ORDER BY totalSales DESC`;
+                break;
+            
+            case 'waiters':
+                query = `
+                    SELECT c.usuario as name, SUM(c.total) as totalSales, COUNT(c.numcheque) as totalTickets
+                    FROM cheques c 
+                    ${dateFilter} 
+                    AND c.usuario IS NOT NULL AND c.usuario <> ''
+                    GROUP BY c.usuario 
+                    ORDER BY totalSales DESC`;
+                break;
+            
+            case 'sales':
+            default:
+                query = `
+                    SELECT CAST(fecha AS DATE) as date, SUM(total) as totalSales
+                    FROM cheques 
+                    ${dateFilter}
+                    GROUP BY CAST(fecha AS DATE) 
+                    ORDER BY date ASC`;
+                break;
+        }
+        
+        // --- 3. OBTENER MÉTODO DE CONEXIÓN ---
+        const restaurantServiceUrl = process.env.RESTAURANT_SERVICE_URL || 'http://restaurant-service:4002';
+        const resp = await fetch(`${restaurantServiceUrl}/internal/data/${restaurantId}`, {
+            headers: { 'X-Internal-Secret': process.env.INTERNAL_SECRET_KEY }
+        });
+        
+        const restaurantData = await resp.json();
+        if (!resp.ok || !restaurantData.success) {
+            throw new Error('No se pudo obtener la información del restaurante.');
+        }
+        const restaurant = restaurantData.restaurant;
+
+        // --- 4. EJECUCIÓN DE LA CONSULTA (DUAL: AGENTE O DIRECTO) ---
+        let results;
+        if (restaurant.connectionMethod === 'agent') {
+            const correlationId = uuidv4();
+            const commandPromise = new Promise((resolve, reject) => {
+                pendingRequests.set(correlationId, { resolve, reject });
+                setTimeout(() => {
+                    if (pendingRequests.has(correlationId)) {
+                        pendingRequests.delete(correlationId);
+                        reject(new Error('Timeout: El agente no respondió a la petición de reporte.'));
+                    }
+                }, 30000);
+            });
+
+            await fetch(`http://connector-service:4006/internal/send-command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    clientId: restaurant.agentKey,
+                    command: `get_report_${reportType}`,
+                    correlationId,
+                    data: { sql: query }
+                })
+            });
+            results = await commandPromise;
+        } else {
+            // Conexión Directa
+             let pool;
+             try {
+                pool = await getConnectedPool({
+                    host: restaurant.connectionHost,
+                    port: restaurant.connectionPort,
+                    user: restaurant.connectionUser,
+                    password: restaurant.connectionPassword, // Asumimos desencriptación si es necesario
+                    database: restaurant.connectionDbName
+                });
+                const result = await pool.request().query(query);
+                results = result.recordset;
+             } finally {
+                 if (pool) await pool.close();
+             }
+        }
+
+        // --- 5. PROCESAMIENTO DE DATOS Y RESPUESTA ---
+        let reportData;
+        if (reportType === 'sales') {
+            // Calculamos KPIs
+            const total = results.reduce((sum, row) => sum + row.totalSales, 0);
+            const transactions = results.length; // Esto es aproximado si es agrupado por día
+            const average = transactions > 0 ? total / transactions : 0;
+            
+            reportData = {
+                kpis: { total, transactions, average, growth: 0 },
+                // Datos para Gráfica de Barras (Gifted Charts)
+                chartData: results.map(row => ({
+                    value: row.totalSales,
+                    label: new Date(row.date).toLocaleDateString('es-MX', { day: '2-digit', month: 'short' }),
+                    frontColor: '#10B981'
+                })),
+                // Datos para Gráfica de Línea
+                lineData: results.map(row => ({
+                     value: row.totalSales,
+                     dataPointText: row.totalSales.toFixed(0)
+                })),
+                // Datos para Tabla
+                tableData: results.map((row, index) => ({
+                    id: index.toString(),
+                    label: new Date(row.date).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' }),
+                    value: row.totalSales,
+                    change: 0 // Aquí podrías calcular el cambio vs día anterior
+                }))
+            };
+        } else {
+            // Para productos y meseros devolvemos la lista tal cual
+            reportData = results;
+        }
+        
+        logger.info(`${logPrefix} Reporte generado exitosamente.`);
+        res.status(200).json({ success: true, data: reportData });
+
+    } catch (error) {
+        logger.error(`${logPrefix} Error fatal:`, error);
+        res.status(500).json({ success: false, message: 'Error al generar el reporte. Verifica la conexión con tu restaurante.' });
+    }
+});
+
 // --- Definición de rutas de consulta y las consultas SQL correspondientes ---
 // Cada ruta ahora pasa su consulta y un 'queryType' único al handler.
 app.get('/query/:restaurantId/products', authenticateToken, dataQueryHandler(

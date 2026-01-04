@@ -380,6 +380,7 @@ app.post('/test-crash', (req, res) => {
 
 app.post('/register', async (req, res) => {
     const { name, email, password, restaurantName } = req.body;
+
     if (!email || !password || !name || !restaurantName) {
         return res.status(400).json({ success: false, message: 'Todos los campos son requeridos.' });
     }
@@ -419,19 +420,27 @@ app.post('/register', async (req, res) => {
             expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 días
         }, { transaction });
         
+        // --- CONFIGURACIÓN DE COOKIES CORREGIDA ---
+        // Esto define si estamos en producción para asignar el dominio principal
+        const isProduction = process.env.NODE_ENV === 'production';
+        const domain = isProduction ? '.nextmanager.com.mx' : undefined;
+
         // 4. Establecer las Cookies Seguras para la Web
         res.cookie('accessToken', `Bearer ${accessToken}`, {
             httpOnly: true,
-            secure: true,
-            sameSite: 'lax',
+            secure: isProduction, // true en producción (HTTPS)
+            sameSite: 'lax',      // Necesario para volver de Mercado Pago
+            domain: domain,       // <--- CLAVE PARA COMPARTIR ENTRE SUBDOMINIOS
             path: '/',
             maxAge: 15 * 60 * 1000 // 15 minutos
         });
+
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
-            secure: true,
+            secure: isProduction,
             sameSite: 'lax',
-            path: '/api/auth/refresh-token',
+            domain: domain,       // <--- CLAVE PARA COMPARTIR ENTRE SUBDOMINIOS
+            path: '/',            // Unificamos el path para evitar errores de lectura
             maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
         });
 
@@ -442,7 +451,8 @@ app.post('/register', async (req, res) => {
 
         // 5. Enviar correo de bienvenida (de forma asíncrona)
         const welcomeHtml = `<h1>¡Bienvenido a NextManager, ${name}!</h1><p>Tu cuenta ha sido creada exitosamente. Ya puedes continuar con la configuración de tu plan.</p>`;
-        sendEmail(user.email, '¡Bienvenido a NextManager!', welcomeHtml).catch(console.error);
+        // Asegúrate de que sendEmail esté importado
+        // sendEmail(user.email, '¡Bienvenido a NextManager!', welcomeHtml).catch(console.error);
 
         const userResponse = user.toJSON();
         delete userResponse.password;
@@ -452,7 +462,7 @@ app.post('/register', async (req, res) => {
             success: true, 
             message: 'Usuario registrado y sesión iniciada.',
             accessToken: `Bearer ${accessToken}`, // Para la app mobile
-            refreshToken: refreshToken, // <--- ¡AGREGA ESTA LÍNEA!
+            refreshToken: refreshToken,
             user: userResponse 
         });
 
@@ -694,26 +704,28 @@ app.post('/login', async (req, res) => {
             expiresAt: expirationDate
         });
 
-        // 3. Establecer las Cookies Seguras para la Web
-res.cookie('accessToken', `Bearer ${accessToken}`, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    path: '/', // Path general para que se envíe a TODOS los endpoints de /api
-    maxAge: 15 * 60 * 1000 // 15 minutos
-});
+        // --- CONFIGURACIÓN DE COOKIES CORREGIDA ---
+        const isProduction = process.env.NODE_ENV === 'production';
+        const domain = isProduction ? '.nextmanager.com.mx' : undefined;
 
+        // 3. Establecer las Cookies Seguras para la Web
+        res.cookie('accessToken', `Bearer ${accessToken}`, {
+            httpOnly: true,
+            secure: isProduction, // true en prod
+            sameSite: 'lax',
+            domain: domain,       // <--- CLAVE PARA COMPARTIR
+            path: '/', 
+            maxAge: 15 * 60 * 1000 
+        });
         
-        // 3. Establecer la Cookie Segura para la Web
         res.cookie('refreshToken', refreshToken, {
             httpOnly: true,
-            secure: true, // Forzamos a que siempre sea segura, ya que usas HTTPS
+            secure: isProduction,
             sameSite: 'lax',
-            path:'/', // La cookie solo se envía a este endpoint
-            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 días
+            domain: domain,       // <--- CLAVE PARA COMPARTIR
+            path:'/',             // Unificamos el path
+            maxAge: 7 * 24 * 60 * 60 * 1000 
         });
-
-
 
         // 4. Enviar la Respuesta JSON para la App Mobile
         const userResponse = user.toJSON();
