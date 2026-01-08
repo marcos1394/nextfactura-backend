@@ -499,14 +499,39 @@ app.post('/',
                 });
             }
             
-            const parsedRestaurantData = typeof restaurantData === 'string' 
+            // 1. Parsear los datos (vienen como string por FormData)
+            let parsedRestaurantData = typeof restaurantData === 'string' 
                 ? JSON.parse(restaurantData) 
                 : restaurantData;
-            const parsedFiscalData = typeof fiscalData === 'string' 
+            let parsedFiscalData = typeof fiscalData === 'string' 
                 ? JSON.parse(fiscalData) 
                 : fiscalData;
             
-            if (!parsedRestaurantData.name || parsedRestaurantData.name.trim().length === 0) {
+            // 2. Función auxiliar para limpiar strings vacíos ("") a null
+            const cleanData = (obj) => {
+                const newObj = { ...obj };
+                Object.keys(newObj).forEach(key => {
+                    if (typeof newObj[key] === 'string' && newObj[key].trim() === '') {
+                        newObj[key] = null;
+                    }
+                });
+                return newObj;
+            };
+
+            // Aplicamos la limpieza
+            parsedRestaurantData = cleanData(parsedRestaurantData);
+            parsedFiscalData = cleanData(parsedFiscalData);
+
+            // --- SOLUCIÓN CRÍTICA: AGENT KEY ---
+            // Si no viene clave (restaurante nuevo), generamos un UUID válido aquí mismo.
+            // Esto evita el error "notNull Violation" de la base de datos.
+            if (!parsedRestaurantData.agentKey) {
+                parsedRestaurantData.agentKey = uuidv4();
+            }
+            // -----------------------------------
+
+            // 3. Validaciones básicas
+            if (!parsedRestaurantData.name) {
                 await transaction.rollback();
                 return res.status(400).json({ 
                     success: false, 
@@ -514,7 +539,7 @@ app.post('/',
                 });
             }
 
-            if (!parsedFiscalData.fiscalAddress || parsedFiscalData.fiscalAddress.trim().length === 0) {
+            if (!parsedFiscalData.fiscalAddress) {
                 await transaction.rollback();
                 return res.status(400).json({
                     success: false,
@@ -522,48 +547,46 @@ app.post('/',
                 });
             }
 
-            // Crear restaurante
+            // 4. Crear restaurante
             const newRestaurant = await Restaurant.create({ 
                 ...parsedRestaurantData, 
-                userId
+                userId 
             }, { transaction });
             
             const restaurantId = newRestaurant.id;
 
-            // --- INICIO DE LA LÓGICA DE SUBDOMINIO (NUEVA) ---
+            // --- INICIO DE LA LÓGICA DE SUBDOMINIO ---
             let subdomain = null;
             let subdomainUrl = null;
             let subdomainCreated = false;
             let subdomainMessage = "El subdominio se ha generado.";
             
             try {
-                // 1. Usamos la función que ya tenías para limpiar el nombre
+                // 1. Generar nombre limpio
                 subdomain = generateSubdomainName(parsedRestaurantData.name, restaurantId);
                 
-                // 2. Verificamos que no exista ya en la base de datos
-                const existing = await Restaurant.findOne({ where: { subdomain } });
+                // 2. Verificar duplicados en BD
+                const existing = await Restaurant.findOne({ where: { subdomain }, transaction });
                 if (existing) {
-                    throw new Error(`El subdominio '${subdomain}' ya está en uso.`);
+                    // Si existe, agregamos un sufijo aleatorio para evitar error
+                    subdomain = `${subdomain}-${Math.floor(Math.random() * 1000)}`;
                 }
                 
-                // 3. Obtenemos el dominio raíz desde las variables de entorno
+                // 3. Construir URL
                 const rootDomain = process.env.ROOT_DOMAIN || 'nextmanager.com.mx';
-                
-                // 4. Construimos la URL
                 subdomainUrl = `https://${subdomain}.${rootDomain}`;
                 
-                // 5. Guardamos la URL en la base de datos
+                // 4. Guardar
                 await newRestaurant.update({ subdomain, subdomainUrl }, { transaction });
                 subdomainCreated = true;
                 
             } catch (subdomainError) {
                 subdomainMessage = `Error al crear el subdominio: ${subdomainError.message}`;
-                logger.error('[Restaurant-Service] Error al generar el subdominio:', subdomainError.message);
-                // No detenemos la creación del restaurante, solo registramos el fallo.
+                logger.error('[Restaurant-Service] Error subdominio:', subdomainError.message);
             }
-            // --- FIN DE LA LÓGICA DE SUBDOMINIO ---
+            // --- FIN LÓGICA SUBDOMINIO ---
 
-            // Procesar archivos
+            // 5. Procesar archivos (Logos y Certificados)
             const logoFile = req.files?.logo?.[0];
             const csdCertificateFile = req.files?.csdCertificate?.[0];
             const csdKeyFile = req.files?.csdKey?.[0];
@@ -576,7 +599,7 @@ app.post('/',
                 await newRestaurant.update({ logoUrl }, { transaction });
             }
 
-            // Crear datos fiscales
+            // 6. Crear datos fiscales
             const newFiscalData = await FiscalData.create({ 
                 ...parsedFiscalData, 
                 restaurantId,
@@ -584,37 +607,37 @@ app.post('/',
                 csdKeyUrl
             }, { transaction });
             
+            // Confirmar transacción
             await transaction.commit();
             
-            // Respuesta segura
+            // 7. Preparar respuesta segura
             const safeRestaurant = newRestaurant.toJSON();
             const safeFiscalData = newFiscalData.toJSON();
-            delete safeFiscalData.csdPassword;
+            delete safeFiscalData.csdPassword; // No devolvemos la contraseña del CSD
             
             res.status(201).json({ 
                 success: true, 
                 restaurant: safeRestaurant, 
                 fiscalData: safeFiscalData,
-                // Devolvemos el resultado de la operación del subdominio
                 subdomain: { 
                     name: subdomain, 
                     url: subdomainUrl, 
                     created: subdomainCreated, 
                     message: subdomainMessage 
-                }
+                } 
             });
 
         } catch (error) {
             await transaction.rollback();
             
-            // Limpiar archivos en caso de error
+            // Limpiar archivos subidos en caso de error
             if (req.files) {
                 for (const field in req.files) {
                     for (const file of req.files[field]) {
                         try {
                             await fs.unlink(file.path);
                         } catch (unlinkError) {
-                            console.error('Error eliminando archivo:', unlinkError);
+                            console.error('Error eliminando archivo temporal:', unlinkError);
                         }
                     }
                 }
@@ -623,7 +646,7 @@ app.post('/',
             logger.error('[Restaurant-Service POST /] Error:', error);
             res.status(500).json({ 
                 success: false, 
-                message: error.message || 'Error al crear el restaurante.' 
+                message: error.message || 'Error interno al crear el restaurante.' 
             });
         }
     }
