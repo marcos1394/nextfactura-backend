@@ -86,6 +86,7 @@ services:
       - app-net
     volumes:
       - /home/servidor/secure_uploads:/app/secure_uploads
+      - /home/servidor/private_downloads:/home/servidor/private_downloads
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:4002/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s

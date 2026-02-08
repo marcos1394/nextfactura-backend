@@ -4,7 +4,7 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken'); // ⚠️ FALTABA ESTE IMPORT
-const fs = require('fs').promises; // ⚠️ FALTABA ESTE IMPORT
+const fs = require('fs'); // <--- CAMBIO CLAVE: Quita el .promises de aquí
 const path = require('path'); // ⚠️ FALTABA ESTE IMPORT
 require('dotenv').config();
 const { v4: uuidv4 } = require('uuid'); // <-- AÑADE ESTA LÍNEA
@@ -309,23 +309,7 @@ const authenticateService = (req, res, next) => {
 };
 
 // --- FUNCIÓN AUXILIAR CORREGIDA ---
-async function getFileAsBase64(fileUrl) {
-    try {
-        const filename = path.basename(fileUrl);
-        const subfolder = fileUrl.includes('/private/') ? 'private' : 'public';
 
-        // La ruta correcta DENTRO del contenedor
-        const fullPath = path.join('/app/secure_uploads', subfolder, filename);
-
-        console.log(`[Service] Leyendo archivo local desde la ruta correcta: ${fullPath}`);
-        const fileBuffer = await fs.readFile(fullPath);
-        return fileBuffer.toString('base64');
-
-    } catch (error) {
-        console.error(`[Service] Error al leer el archivo local: ${fileUrl}`, error);
-        throw new Error(`No se pudo leer el archivo: ${path.basename(fileUrl)}`);
-    }
-}
 
 // --- FUNCIONES AUXILIARES ---
 const buildSecureFileUrl = (filename, isPublic = true, restaurantId = null) => {
@@ -363,6 +347,70 @@ const generateSubdomainName = (restaurantName, restaurantId) => {
 
 // Inicializar directorios seguros
 createSecureDirectories().catch(console.error);
+
+// --- HELPER PARA COMPARAR VERSIONES (Agrégalo antes de las rutas) ---
+const compareVersions = (v1, v2) => {
+    const parts1 = v1.split('.').map(Number);
+    const parts2 = v2.split('.').map(Number);
+    for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+        const val1 = parts1[i] || 0;
+        const val2 = parts2[i] || 0;
+        if (val1 > val2) return 1;
+        if (val1 < val2) return -1;
+    }
+    return 0;
+};
+
+// --- ENDPOINT DESCARGA ---
+app.get('/api/restaurants/download-connector', authenticateToken, async (req, res) => {
+    try {
+        console.log(`[RestaurantService] Buscando última versión por NUMERACIÓN...`);
+
+        // 1. Ruta interna (Volumen montado)
+        const dirPath = '/app/secure_uploads/public';
+
+        if (!fs.existsSync(dirPath)) {
+            console.error(`[Error] No existe la carpeta: ${dirPath}`);
+            return res.status(500).json({ message: 'Error de configuración.' });
+        }
+
+        // 2. Leer carpeta y filtrar .msi
+        const files = fs.readdirSync(dirPath)
+            .filter(file => file.endsWith('.msi') && file.includes('NextFactura'))
+            .map(fileName => {
+                // EXPRESIÓN REGULAR: Busca patrones tipo "1.0.4", "2.3.1", etc.
+                const versionMatch = fileName.match(/(\d+\.\d+\.\d+)/);
+                return {
+                    name: fileName,
+                    path: path.join(dirPath, fileName),
+                    // Si encuentra versión la usa, si no, pone '0.0.0'
+                    version: versionMatch ? versionMatch[0] : '0.0.0' 
+                };
+            });
+
+        // 3. Ordenar por VERSIÓN (Descendente: Mayor a Menor)
+        files.sort((a, b) => compareVersions(b.version, a.version));
+
+        if (files.length > 0) {
+            const latest = files[0];
+            console.log(`[RestaurantService] Versión ganadora: ${latest.version} (${latest.name})`);
+            
+            res.download(latest.path, latest.name, (err) => {
+                if (err && !res.headersSent) {
+                    console.error('Error enviando archivo:', err);
+                    res.status(500).send('Error en la descarga');
+                }
+            });
+        } else {
+            res.status(404).json({ message: 'No se encontraron instaladores válidos.' });
+        }
+
+    } catch (error) {
+        console.error('Error crítico:', error);
+        res.status(500).json({ message: 'Error interno.' });
+    }
+});
+
 
 // --- RUTAS DE ARCHIVOS ---
 
@@ -1054,37 +1102,10 @@ app.post('/:restaurantId/generate-agent-key', authenticateToken, async (req, res
 });
 
 // --- NUEVO ENDPOINT: Descarga Segura del Conector ---
-// Este endpoint es llamado por el FRONTEND de un usuario logueado.
-app.get('/connector/download', authenticateToken, async (req, res) => {
-    try {
-        const userId = req.user.id;
+// (compareVersions already declared earlier; duplicate removed)
 
-        // 1. VERIFICAR LA SUSCRIPCIÓN ACTIVA DEL USUARIO
-        // Asumiendo que tienes un modelo PlanPurchase
-        const activeSubscription = await PlanPurchase.findOne({
-            where: { userId: userId, status: 'active' }
-        });
 
-        if (!activeSubscription) {
-            return res.status(403).json({ 
-                success: false, 
-                message: 'Acceso denegado. Se requiere un plan activo para descargar el conector.' 
-            });
-        }
 
-        // 2. SERVIR EL ARCHIVO DE FORMA SEGURA
-        // La ruta donde moviste el instalador en el servidor.
-        const filePath = '/downloads/NextFactura Connector 1.0.0.msi';        
-        console.log(`[Service] Usuario ${userId} ha iniciado la descarga del conector.`);
-        
-        // El método res.download() de Express envía el archivo al navegador.
-        res.download(filePath);
-
-    } catch (error) {
-        console.error('[Service /connector/download] Error:', error);
-        res.status(500).json({ success: false, message: 'No se pudo procesar la descarga.' });
-    }
-});
 
 // --- NUEVO ENDPOINT: Validación Interna de Clave de Agente ---
 // Este endpoint es llamado SOLAMENTE por el connector-service.
